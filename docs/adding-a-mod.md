@@ -31,6 +31,8 @@ mods/<modid>/          ← modid 必须与 mods.toml 里的 modId 一致，小�
 ```properties
 minecraft_version=1.21.1
 neoforge_version=21.1.216
+# mods.toml 里用它声明 neoforge 依赖，放宽到任意 21.1.x（别写死成某个补丁版本）
+neoforge_version_range=[21.1,)
 ```
 
 - `minecraft_version` 精确等于 `1.21.1`；
