@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "enabled": true,
+  "_说明": [
+    "这是 Config Patcher 的规则文件（config/configpatcher/rules.json）。",
+    "工作方式：当 target 指定的 mod 存在、且版本符合 versionRange 时，把它的配置里 patches 列出的条目改成指定值；目标 mod 不存在就静默跳过。",
+    "下面三条规则是拿一个 NeoForge 1.21.1 整合包的真实配置文件校准出来的，可直接参考：",
+    "  ae2    -> config/ae2-client.toml     [terminals]              terminalMargin",
+    "  create -> config/create-server.toml  [kinetics.encasedFan]    fanProcessingTime",
+    "  jei    -> config/jei/jei-client.ini  [cheating]               giveMode（值必须大写 INVENTORY）",
+    "改写项两种写法：简写 \"a.b\": 值 ；完整 { \"path\": \"a.b\", \"aliases\": [...], \"optional\": true, \"value\": 值 }。",
+    "改完规则后在游戏里执行 /configpatcher reload 即可生效；没改成功的项会在进入游戏时于聊天栏提示。",
+    "查看某个 mod 真实有哪些配置项：/configpatcher dump <modid>。规则体检：/configpatcher check。"
+  ],
+  "rules": [
+    {
+      "id": "ae2-terminalMargin",
+      "comment": "应用能源2：终端上下留白 terminalMargin 改为 0（给居中的搜索栏腾位置）",
+      "target": "ae2",
+      "versionRange": "*",
+      "configFile": "ae2-client.toml",
+      "configType": "CLIENT",
+      "handler": "configvalue",
+      "patches": [
+        {
+          "path": "terminals.terminalMargin",
+          "aliases": ["terminalMargin", "client.terminalMargin"],
+          "value": 0
+        }
+      ]
+    },
+    {
+      "id": "create-fanProcessingTime",
+      "comment": "机械动力：风扇处理时间 fanProcessingTime 改为 0（立即完成）—— 在 server 配置里，进世界时加载",
+      "target": "create",
+      "versionRange": "*",
+      "configFile": "create-server.toml",
+      "configType": "SERVER",
+      "handler": "configvalue",
+      "patches": [
+        {
+          "path": "kinetics.encasedFan.fanProcessingTime",
+          "aliases": ["kinetics.fanProcessingTime", "fanProcessingTime", "features.fanProcessingTime"],
+          "value": 0
+        }
+      ]
+    },
+    {
+      "id": "jei-giveMode",
+      "comment": "JEI：给予模式 = INVENTORY（ini 是 JEI 自己的配置系统，走文件方式；枚举值必须大写）",
+      "target": "jei",
+      "versionRange": "*",
+      "configFile": "jei/jei-client.ini",
+      "handler": "toml-file",
+      "patches": [
+        {
+          "path": "cheating.giveMode",
+          "aliases": ["giveMode"],
+          "value": "INVENTORY"
+        }
+      ]
+    }
+  ]
+}

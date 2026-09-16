@@ -1,0 +1,18 @@
+name: 校验版本约束
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify-neoforge-version:
+    name: 只允许 NeoForge 1.21.1
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 逐个校验 mods/ 下的版本
+        shell: pwsh
+        run: ./scripts/verify-version.ps1

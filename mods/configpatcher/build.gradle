@@ -1,0 +1,115 @@
+plugins {
+    id 'java-library'
+    id 'eclipse'
+    id 'idea'
+    id 'maven-publish'
+    id 'net.neoforged.moddev' version '2.0.107'
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = mod_id
+}
+
+// Mojang 从 1.20.5 起随游戏分发 Java 21
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+repositories {
+    // 本机离线依赖仓库（存在时才启用）：无网络环境下也能编译与跑单元测试。
+    // 放在最前面，命中后就不会再去访问外网仓库。
+    def offlineRepo = rootProject.file('../ae2wtlib-forge-1.20.1-port/offline-maven')
+    if (offlineRepo.isDirectory()) {
+        maven { url = uri(offlineRepo) }
+    }
+    mavenLocal()
+    mavenCentral()
+}
+
+neoForge {
+    version = project.neoforge_version
+
+    runs {
+        client {
+            client()
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+
+        server {
+            server()
+            programArgument '--nogui'
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            logLevel = org.slf4j.event.Level.DEBUG
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet(sourceSets.main)
+        }
+    }
+}
+
+dependencies {
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    // 测试直接用到 gson 与 slf4j（规则解析、日志），这里显式声明，避免依赖 Minecraft 依赖图的可见性
+    testImplementation "com.google.code.gson:gson:2.10.1"
+    testImplementation "org.slf4j:slf4j-api:2.0.9"
+}
+
+tasks.named('processResources', ProcessResources).configure {
+    includeEmptyDirs = false
+
+    def replaceProperties = [
+            mod_id           : mod_id,
+            mod_name         : mod_name,
+            mod_license      : mod_license,
+            mod_version      : mod_version,
+            mod_group_id     : mod_group_id,
+            mod_authors      : mod_authors,
+            mod_description  : mod_description,
+            minecraft_version: minecraft_version,
+            neoforge_version : neoforge_version
+    ]
+
+    inputs.properties replaceProperties
+    filesMatching(["META-INF/neoforge.mods.toml", "pack.mcmeta"]) {
+        expand replaceProperties
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+}
+
+// 同一个 jar 既是 NeoForge mod，也是 Java Agent：
+// 作为 Agent 时在 FML 扫描 mods 目录之前完成「注入 mod / 资源包 / 改键位」。
+tasks.named('jar', Jar).configure {
+    manifest {
+        attributes(
+                'Premain-Class': 'dev.configpatcher.agent.PatcherAgent',
+                'Agent-Class': 'dev.configpatcher.agent.PatcherAgent',
+                'Can-Retransform-Classes': 'false',
+                'Can-Redefine-Classes': 'false',
+                'Implementation-Title': project.mod_name,
+                'Implementation-Version': project.mod_version
+        )
+    }
+}
+
+tasks.named('test', Test).configure {
+    useJUnitPlatform()
+}
+
+idea {
+    module {
+        downloadSources = true
+        downloadJavadoc = true
+    }
+}

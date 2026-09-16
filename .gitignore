@@ -1,0 +1,35 @@
+# Gradle 与构建产物
+.gradle/
+build/
+runs/
+run-data/
+out/
+bin/
+src/generated/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+.vscode/
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 日志与临时文件
+*.log
+*.tmp
+*.bak
+*.configpatcher.bak
+*.orig
+*.rej
+
+# 本地依赖仓库（各机器自备，不入库）
+offline-maven/
+local-maven/
