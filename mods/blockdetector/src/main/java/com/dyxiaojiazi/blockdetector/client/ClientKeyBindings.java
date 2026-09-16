@@ -12,7 +12,6 @@ import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.client.settings.KeyConflictContext;
 import org.lwjgl.glfw.GLFW;
 
-@EventBusSubscriber(modid = BlockDetector.MODID, value = Dist.CLIENT, bus = EventBusSubscriber.Bus.MOD)
 public final class ClientKeyBindings {
     public static final String CATEGORY = "key.categories.blockdetector";
     public static final KeyMapping OPEN_CONFIG = new KeyMapping(
@@ -31,7 +30,7 @@ public final class ClientKeyBindings {
         event.register(OPEN_CONFIG);
     }
 
-    @EventBusSubscriber(modid = BlockDetector.MODID, value = Dist.CLIENT, bus = EventBusSubscriber.Bus.GAME)
+    @EventBusSubscriber(modid = BlockDetector.MODID, value = Dist.CLIENT)
     public static final class Handler {
         private Handler() {
         }

@@ -37,10 +37,13 @@ scripts/verify-version.ps1    版本约束自查脚本（本地与 CI 共用）
 | Mod | 一句话说明 | 构建 |
 |---|---|---|
 | [blockdetector](mods/blockdetector) | 高亮玩家周围指定范围内被配置的方块 | `pwsh ./scripts/build-mod.ps1 blockdetector` |
-| [floatingexcavation](mods/floatingexcavation) | 移除完全浸没在水中或悬空时的挖掘速度惩罚 | `pwsh ./scripts/build-mod.ps1 floatingexcavation` |
+| [floatingexcavation](mods/floatingexcavation) | **移植版**：移除完全浸没在水中或悬空时的挖掘速度惩罚（原作者 DY_XiaoJiaZi）| `pwsh ./scripts/build-mod.ps1 floatingexcavation` |
 | [fluixcompat](mods/fluixcompat) | AE2 水晶（fluix）材料兼容：配方 / 标签 + 材料 Mixin | `pwsh ./scripts/build-mod.ps1 fluixcompat` |
-| [constructionwand](mods/constructionwand) | Construction Wand 的 1.21.1 构建：可扩展的建造 / 破坏法杖 | `pwsh ./scripts/build-mod.ps1 constructionwand` |
+| [constructionwand](mods/constructionwand) | **移植版**：可扩展的建造 / 破坏法杖（原作者 ThetaDev）| `pwsh ./scripts/build-mod.ps1 constructionwand` |
 | [configpatcher](mods/configpatcher/README.md) | 条件式改写其它 mod 的配置；同时是 Java Agent，启动前把 mod / 资源包 / 键位注入到实例 | `pwsh ./scripts/build-mod.ps1 configpatcher` |
+
+> 标注「移植版」的 mod：原 mod 由原作者发布，这里只是把它移植/打包到 NeoForge 1.21.1。
+> 具体来源写在各自 `gradle.properties` 的 `mod_credits` 与产物 `mods.toml` 的 `credits` 字段里。
 
 ## 构建
 

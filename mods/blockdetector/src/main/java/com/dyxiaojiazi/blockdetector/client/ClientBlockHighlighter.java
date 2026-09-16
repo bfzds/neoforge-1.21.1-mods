@@ -41,7 +41,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-@EventBusSubscriber(modid = BlockDetector.MODID, value = Dist.CLIENT, bus = EventBusSubscriber.Bus.GAME)
+@EventBusSubscriber(modid = BlockDetector.MODID, value = Dist.CLIENT)
 public final class ClientBlockHighlighter {
     private static final int CHUNKS_PER_TICK = 2;
     private static final List<BlockPos> MATCHES = new ArrayList<>();
