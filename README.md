@@ -47,6 +47,46 @@ cd mods/<modname>
 
 要求 JDK 21。首次构建需要联网拉取 NeoForge 依赖。
 
+## 只操作某一个 mod
+
+多个 mod 之间互不干扰：改 A 的代码不会碰到 B，构建和测试也可以只跑 A。
+
+```powershell
+# 只构建某一个 mod（含单元测试）
+pwsh ./scripts/build-mod.ps1 configpatcher
+
+# 只跑单元测试
+pwsh ./scripts/build-mod.ps1 configpatcher -TestOnly
+
+# 只编译打包，跳过测试
+pwsh ./scripts/build-mod.ps1 configpatcher -SkipTests
+
+# 不填名字就是构建全部 mod
+pwsh ./scripts/build-mod.ps1
+```
+
+也可以直接进目录用 Gradle：
+
+```bash
+cd mods/configpatcher
+./gradlew build
+```
+
+提交时只暂存那一个 mod 的改动：
+
+```bash
+git add mods/configpatcher
+git commit -m "fix(configpatcher): 修正 xxx"
+```
+
+CI 侧同样按 mod 隔离：
+
+| Job | 做什么 |
+|---|---|
+| `verify-version` | 快速校验所有 mod 的版本约束（十几秒）|
+| `list-mods` | 自动发现 `mods/` 下有哪些 mod（**新增 mod 不用改 CI 文件**）|
+| `build` | 每个 mod 一个**并行** job，`fail-fast: false` —— 某个 mod 编译失败不会掩盖其它 mod 的结果 |
+
 ## 新增一个 mod
 
 见 [docs/adding-a-mod.md](docs/adding-a-mod.md)。核心三条：

@@ -114,3 +114,5 @@ rootProject.name = "<modid>"
 4. 该 mod 目录下有 `README.md`，写清楚怎么用、依赖什么；
 5. 没有把个人绝对路径（游戏目录、mods 目录）写进代码、文档或模板——用占位符或示例路径；
 6. 根 `README.md` 的「现有 mod」表格里补一行。
+
+> CI 不需要改：`build` job 会自动发现 `mods/` 下所有含 `gradle.properties` 的目录，并为每个 mod 起一个并行任务。

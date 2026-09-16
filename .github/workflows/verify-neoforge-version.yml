@@ -1,4 +1,4 @@
-name: 校验版本约束
+name: 校验与构建
 
 on:
   push:
@@ -6,13 +6,54 @@ on:
   workflow_dispatch:
 
 jobs:
-  verify-neoforge-version:
+  # ① 硬性约束：只允许 NeoForge 1.21.1（快，十几秒）
+  verify-version:
     name: 只允许 NeoForge 1.21.1
     runs-on: ubuntu-latest
     steps:
       - name: 拉取代码
         uses: actions/checkout@v4
-
       - name: 逐个校验 mods/ 下的版本
         shell: pwsh
         run: ./scripts/verify-version.ps1
+
+  # ② 自动发现有哪些 mod（新增 mod 不需要改本文件）
+  list-mods:
+    name: 发现 mod 列表
+    runs-on: ubuntu-latest
+    outputs:
+      mods: ${{ steps.list.outputs.mods }}
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+      - id: list
+        name: 列出 mods/ 下的 mod
+        shell: pwsh
+        run: ./scripts/list-mods.ps1
+
+  # ③ 每个 mod 一个并行 job：某个 mod 出错不影响其它 mod 的构建结果
+  build:
+    name: 构建 ${{ matrix.mod }}
+    needs: [verify-version, list-mods]
+    if: ${{ needs.list-mods.outputs.mods != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mod: ${{ fromJSON(needs.list-mods.outputs.mods) }}
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: 配置 Gradle 缓存
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: 构建 mods/${{ matrix.mod }}
+        working-directory: mods/${{ matrix.mod }}
+        run: chmod +x gradlew && ./gradlew build --no-daemon
