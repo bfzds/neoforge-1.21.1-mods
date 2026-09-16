@@ -43,7 +43,12 @@ public final class ConfigPatcher {
     }
 
     private static void onCommonSetup(FMLCommonSetupEvent event) {
-        event.enqueueWork(PatchEngine::summarize);
+        event.enqueueWork(() -> {
+            PatchEngine.summarize();
+            // 文件层规则补跑：目标 mod 用自己的配置系统时不会触发 ModConfigEvent，
+            // 这类规则（handler = toml-file）在这里按文件名直接执行一次。
+            PatchEngine.applyFileLayerRules();
+        });
     }
 
     private static void onServerStarted(ServerStartedEvent event) {

@@ -34,8 +34,20 @@ public final class TomlFilePatchHandler implements PatchHandler {
 
     @Override
     public List<PatchOutcome> apply(PatchContext context) {
-        PatchRule rule = context.rule();
-        String fileName = context.config().getFileName();
+        return patch(context.rule(), context.config().getFileName());
+    }
+
+    /**
+     * 不依赖 ModConfig 的入口：直接按文件名改写配置文件。
+     *
+     * <p>给「目标 mod 用自己那套配置系统」的情况用 —— 例如 JEI 的 {@code config/jei/jei-client.ini}，
+     * 它不会触发 NeoForge 的 {@code ModConfigEvent}，所以只能由启动阶段的补跑按文件名直接执行。
+     */
+    public static List<PatchOutcome> applyToFile(PatchRule rule, String fileName) {
+        return patch(rule, fileName);
+    }
+
+    private static List<PatchOutcome> patch(PatchRule rule, String fileName) {
         Path file = FMLPaths.CONFIGDIR.get().resolve(fileName);
         if (!Files.isRegularFile(file)) {
             return List.of(PatchOutcome.missing(rule.id(), rule.targetMod(), fileName,

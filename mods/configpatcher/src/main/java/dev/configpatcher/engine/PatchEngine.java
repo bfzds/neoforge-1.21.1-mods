@@ -3,6 +3,7 @@ package dev.configpatcher.engine;
 import dev.configpatcher.Log;
 import dev.configpatcher.handler.HandlerRegistry;
 import dev.configpatcher.handler.PatchHandler;
+import dev.configpatcher.handler.TomlFilePatchHandler;
 import dev.configpatcher.rule.PatchEntry;
 import dev.configpatcher.rule.PatchRule;
 import dev.configpatcher.rule.RuleLoader;
@@ -158,6 +159,75 @@ public final class PatchEngine {
             } catch (Throwable throwable) {
                 Log.LOGGER.warn("遍历 {} 配置时出错：{}", type, throwable.toString());
             }
+        }
+        return reports;
+    }
+
+    /**
+     * 文件层规则补跑。
+     *
+     * <p>有些 mod 用自己那套配置系统（例如 JEI 的 {@code config/jei/jei-client.ini}），
+     * 它们不会触发 NeoForge 的 {@code ModConfigEvent}；如果只靠配置事件驱动，
+     * 这类规则会永远停在「从未命中」。所以在这里按文件名直接执行一次。
+     *
+     * <p>只处理显式声明了 {@code "handler": "toml-file"} 且写了 {@code configFile} 的规则，
+     * 因此对走 ModConfigSpec 的目标没有任何影响（那些已经由配置事件处理过了）。
+     */
+    public static List<PatchReport> applyFileLayerRules() {
+        RuleSet current = ruleSet;
+        List<PatchReport> reports = new ArrayList<>();
+        if (!current.enabled() || current.isEmpty()) {
+            return reports;
+        }
+
+        for (PatchRule rule : current.rules()) {
+            if (!rule.enabled() || PatchRule.DEFAULT_HANDLER.equalsIgnoreCase(rule.handler())) {
+                continue;
+            }
+            if (rule.configFile() == null || rule.configFile().isBlank()) {
+                continue;
+            }
+            if (!ModPresence.isLoaded(rule.targetMod())) {
+                continue;
+            }
+            String version = ModPresence.versionOf(rule.targetMod());
+            if (!rule.matchesVersion(version)) {
+                continue;
+            }
+
+            List<PatchOutcome> outcomes;
+            try {
+                outcomes = TomlFilePatchHandler.applyToFile(rule, rule.configFile());
+            } catch (Throwable throwable) {
+                outcomes = List.of(PatchOutcome.error(rule.id(), rule.targetMod(), rule.configFile(),
+                        "文件层处理异常：" + throwable.getClass().getSimpleName()
+                                + (throwable.getMessage() == null ? "" : "：" + throwable.getMessage())));
+            }
+            if (outcomes.isEmpty()) {
+                continue;
+            }
+
+            // 记账：失败项加入跳过名单，成功项从名单里划掉（与配置事件路径同一套规则）
+            Map<String, PatchOutcome> lastByPath = new LinkedHashMap<>();
+            for (PatchOutcome outcome : outcomes) {
+                lastByPath.put(outcome.path(), outcome);
+            }
+            for (PatchOutcome outcome : lastByPath.values()) {
+                switch (outcome.status()) {
+                    case MISSING_ENTRY, ERROR -> FailureLedger.record(rule.id(), rule.targetMod(),
+                            rule.configFile(), outcome.path(), outcome.detail());
+                    case APPLIED, UNCHANGED -> FailureLedger.forget(rule.id(), outcome.path());
+                    default -> {
+                        // VERSION_MISMATCH / SKIPPED 等不属于失败
+                    }
+                }
+            }
+
+            PatchReport report = new PatchReport(rule.targetMod() + "/" + rule.configFile());
+            report.addAll(outcomes);
+            remember(report);
+            logReport(report);
+            reports.add(report);
         }
         return reports;
     }
