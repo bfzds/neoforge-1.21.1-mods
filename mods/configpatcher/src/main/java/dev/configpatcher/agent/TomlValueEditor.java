@@ -24,14 +24,23 @@ public final class TomlValueEditor {
     /**
      * @param content 改写后的完整内容（未命中时原样返回）
      * @param changed 是否真的改了
+     * @param found   段与键是否都在目标文件里找到
+     *                —— 用来区分「值已经是目标值」（changed=false, found=true）
+     *                和「找不到这个键」（changed=false, found=false），
+     *                以前这两种情况在日志里挤成同一句话，排查时看不出区别。
      */
-    public record Result(String content, boolean changed) {
+    public record Result(String content, boolean changed, boolean found) {
+
+        /** 键存在，只是值已经是目标值。 */
+        public boolean alreadyUpToDate() {
+            return found && !changed;
+        }
     }
 
     public static Result set(String content, String dottedKey, String value) {
         String source = content == null ? "" : content;
         if (dottedKey == null || dottedKey.isBlank()) {
-            return new Result(source, false);
+            return new Result(source, false, false);
         }
 
         String[] parts = dottedKey.split("\\.");
@@ -65,7 +74,8 @@ public final class TomlValueEditor {
                 }
             }
             if (!found) {
-                return new Result(source, false);
+                // 段都不存在：既没找到，也没改动
+                return new Result(source, false, false);
             }
         }
 
@@ -82,12 +92,14 @@ public final class TomlValueEditor {
             }
             String rewritten = rewrite(line, foundKey, value);
             if (rewritten.equals(line)) {
-                return new Result(source, false);
+                // 键在，值已经是目标值
+                return new Result(source, false, true);
             }
             lines.set(i, rewritten);
-            return new Result(String.join("\n", lines) + "\n", true);
+            return new Result(String.join("\n", lines) + "\n", true, true);
         }
-        return new Result(source, false);
+        // 段在（或全文件搜），但这个键没有
+        return new Result(source, false, false);
     }
 
     /** 保留缩进与行尾注释，只换掉等号后面的值。 */

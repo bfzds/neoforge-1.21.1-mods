@@ -1,5 +1,6 @@
 package dev.configpatcher.agent;
 
+import java.io.IOException;
 import java.lang.instrument.Instrumentation;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -31,6 +32,12 @@ public final class PatcherAgent {
     /** 默认的注入清单位置，相对游戏目录。 */
     public static final String SETTINGS_RELATIVE = "config/configpatcher/inject.properties";
     private static final String LOG_RELATIVE = "config/configpatcher/agent.log";
+
+    /**
+     * 退出钩子里先等一会儿再读配置：退出阶段其它 mod（tweakeroo / malilib 等）也在写各自的配置文件，
+     * JVM 的多个 shutdown hook 是并发跑的，不等就有可能读到它们保存之前的旧内容。
+     */
+    private static final long EXPORT_DELAY_MILLIS = 1500L;
 
     private static final List<String> LINES = new ArrayList<>();
 
@@ -74,6 +81,12 @@ public final class PatcherAgent {
             log("注入清单：" + settingsFile + (Files.isRegularFile(settingsFile) ? "" : "（不存在，跳过注入）"));
 
             AgentInjector.Settings settings = AgentInjector.loadSettings(settingsFile);
+            // 本次会话的「启动成功」握手：先作废旧凭据，等 mod 侧跑到 FMLCommonSetupEvent 才认账。
+            // 游戏崩在 mod 加载阶段时，凭据永远写不出来，退出钩子就不会回写样本。
+            String bootId = SessionMarker.beginSession(gameDir);
+            long crashBaseline = latestCrashReportMillis(gameDir);
+            log("本次启动编号：" + bootId + "；只有游戏加载成功过才会回写样本");
+            registerAutoExportHook(gameDir, settings, bootId, crashBaseline);
             if (settings.modSources().isEmpty() && settings.resourcePackSources().isEmpty()
                     && settings.fileOverrides().isEmpty() && settings.keybindFileOverrides().isEmpty()
                     && settings.valueEdits().isEmpty()
@@ -89,6 +102,115 @@ public final class PatcherAgent {
             log("注入过程出错（游戏会照常启动）：" + throwable);
         } finally {
             flushLog(gameDir);
+        }
+    }
+
+    /**
+     * 注册「关闭游戏自动导出」：JVM 退出时把本实例当前生效的配置回写成样本库的文件。
+     *
+     * <p>为什么必须放在退出钩子：用户是在游戏里调的键位，只有退出阶段磁盘上的文件才是最终版本；
+     * 而下次启动 Agent 又会用样本覆盖实例，所以「收编」只能发生在这一次退出之前。
+     *
+     * <p><b>但退出钩子崩溃时也会跑</b>，而崩溃时实例里的配置文件可能只是半成品。所以回写前要过两道闸：
+     * <ol>
+     *     <li>mod 侧有没有写下「本次启动成功」的凭据（{@link SessionMarker}）—— 挡 mod 加载失败；</li>
+     *     <li>本次会话有没有新增崩溃报告 —— 挡运行期崩溃。</li>
+     * </ol>
+     * 任何一道没过就整体跳过回写，宁可少收编一次，也不能把样本库写坏。
+     *
+     * @param bootId        本次启动编号（只用于日志对照）
+     * @param crashBaseline 本次启动前 {@code crash-reports/} 里最新的文件时间
+     */
+    private static void registerAutoExportHook(Path gameDir, AgentInjector.Settings settings,
+                                               String bootId, long crashBaseline) {
+        if (!settings.autoExportOnExit()) {
+            return;
+        }
+        Thread hook = new Thread(() -> {
+            try {
+                Thread.sleep(EXPORT_DELAY_MILLIS);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+            try {
+                if (!SessionMarker.startedThisSession(gameDir)) {
+                    appendExportLog(gameDir, List.of(new AgentInjector.Action("export", "-",
+                            "本次会话没有成功启动（游戏没走到 mod 加载完成就退出了），已跳过回写样本，"
+                                    + "样本保持不变；本次启动编号 " + bootId, false)));
+                    return;
+                }
+                long newestCrash = latestCrashReportMillis(gameDir);
+                if (newestCrash > crashBaseline) {
+                    appendExportLog(gameDir, List.of(new AgentInjector.Action("export", "-",
+                            "本次会话生成过崩溃报告，已跳过回写样本，避免把半成品配置写进样本库", false)));
+                    return;
+                }
+                List<AgentInjector.Action> actions = SampleExporter.export(gameDir, settings);
+                appendExportLog(gameDir, actions);
+            } catch (Throwable throwable) {
+                appendExportLog(gameDir, List.of(new AgentInjector.Action("export", "-",
+                        "导出出错：" + throwable, false)));
+            }
+        }, "configpatcher-auto-export");
+        try {
+            Runtime.getRuntime().addShutdownHook(hook);
+            log("已开启「关闭游戏自动导出」：退出时会把当前配置回写样本（前提是本次启动成功且没崩溃）");
+        } catch (Throwable throwable) {
+            log("注册自动导出钩子失败：" + throwable);
+        }
+    }
+
+    /** {@code crash-reports/} 目录里最新的文件时间（0 表示目录不存在或没有文件）。 */
+    static long latestCrashReportMillis(Path gameDir) {
+        if (gameDir == null) {
+            return 0L;
+        }
+        Path dir = gameDir.resolve("crash-reports");
+        if (!Files.isDirectory(dir)) {
+            return 0L;
+        }
+        long newest = 0L;
+        try (var stream = Files.list(dir)) {
+            List<Path> files = stream.filter(Files::isRegularFile).toList();
+            for (Path file : files) {
+                try {
+                    newest = Math.max(newest, Files.getLastModifiedTime(file).toMillis());
+                } catch (IOException ignored) {
+                    // 读不到这一个就跳过
+                }
+            }
+        } catch (IOException ignored) {
+            // 目录不可读时按「没有崩溃报告」处理
+        }
+        return newest;
+    }
+
+    /** 导出结果追加到 agent.log（不能用覆盖写，否则启动阶段的记录会被挤掉）。 */
+    private static void appendExportLog(Path gameDir, List<AgentInjector.Action> actions) {
+        if (gameDir == null) {
+            return;
+        }
+        long changed = actions.stream().filter(AgentInjector.Action::changed).count();
+        List<String> block = new ArrayList<>();
+        block.add("[ConfigPatcher Agent] ===== 关闭游戏自动导出 =====");
+        for (AgentInjector.Action action : actions) {
+            block.add("[ConfigPatcher Agent] [export] " + action.name() + " —— " + action.detail());
+        }
+        block.add("[ConfigPatcher Agent] 导出完成：共 " + actions.size() + " 项，其中 " + changed + " 项写回样本");
+        try {
+            Path file = gameDir.resolve(LOG_RELATIVE);
+            Path parent = file.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            List<String> all = Files.isRegularFile(file)
+                    ? new ArrayList<>(Files.readAllLines(file, StandardCharsets.UTF_8))
+                    : new ArrayList<>();
+            all.add("");
+            all.addAll(block);
+            Files.write(file, all, StandardCharsets.UTF_8);
+        } catch (Exception ignored) {
+            // 写日志失败不影响游戏退出
         }
     }
 

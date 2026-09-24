@@ -76,10 +76,20 @@ public final class AgentInjector {
             List<FileOverride> keybindFileOverrides,
             String keybindSource,
             String keybindTarget,
-            List<ValueEdit> valueEdits
+            List<ValueEdit> valueEdits,
+            boolean autoExportOnExit
     ) {
+        /** 兼容旧签名：默认开启「关闭游戏自动导出」。 */
+        public Settings(List<Path> modSources, List<Path> resourcePackSources, boolean injectSelf,
+                        List<FileOverride> fileOverrides, List<FileOverride> keybindFileOverrides,
+                        String keybindSource, String keybindTarget, List<ValueEdit> valueEdits) {
+            this(modSources, resourcePackSources, injectSelf, fileOverrides, keybindFileOverrides,
+                    keybindSource, keybindTarget, valueEdits, true);
+        }
+
         public static Settings empty() {
-            return new Settings(List.of(), List.of(), true, List.of(), List.of(), null, "options.txt", List.of());
+            return new Settings(List.of(), List.of(), true, List.of(), List.of(), null, "options.txt",
+                    List.of(), false);
         }
 
         /** 是否有任何需要动 mods 目录的配置（没有就完全不用扫描）。 */
@@ -211,8 +221,10 @@ public final class AgentInjector {
         }
 
         List<ValueEdit> valueEdits = parseValueEdits(map.get("valueedits"));
+        // 关闭游戏时是否自动把本实例当前配置回写成样本：默认开，写 false 可单独关掉
+        boolean autoExport = !"false".equalsIgnoreCase(map.getOrDefault("autoexportonexit", "true"));
         return new Settings(modSources, packSources, self, overrides, keybindOverrides,
-                keybindSource, keybindTarget, valueEdits);
+                keybindSource, keybindTarget, valueEdits, autoExport);
     }
 
     /** 解析 {@code 相对路径:段.键=值;...} 形式的键值改写项。 */
@@ -543,9 +555,11 @@ public final class AgentInjector {
         Path options = gameDir.resolve("options.txt");
         try {
             String existing = Files.isRegularFile(options) ? Files.readString(options, StandardCharsets.UTF_8) : "";
-            write(options, KeybindMerger.ensureResourcePacks(existing, packNames));
+            boolean wrote = write(options, KeybindMerger.ensureResourcePacks(existing, packNames));
             actions.add(new Action("resourcepack", "options.txt",
-                    "已启用 " + packNames.size() + " 个注入的资源包", true));
+                    wrote ? "已启用 " + packNames.size() + " 个注入的资源包"
+                            : "资源包列表已是最新，未改动",
+                    wrote));
         } catch (IOException ex) {
             actions.add(new Action("resourcepack", "options.txt", "启用失败：" + ex.getMessage(), false));
         }
@@ -564,8 +578,12 @@ public final class AgentInjector {
                 String existing = Files.readString(target, StandardCharsets.UTF_8);
                 TomlValueEditor.Result result = TomlValueEditor.set(existing, edit.key(), edit.value());
                 if (!result.changed()) {
+                    // 区分「值已经是目标值」和「找不到这个键」：前者不用管，后者要改规则
                     actions.add(new Action("value", edit.file(),
-                            edit.key() + "：已是目标值或未找到该键", false));
+                            result.found()
+                                    ? edit.key() + "：已是目标值，无需改动"
+                                    : edit.key() + "：未找到该键（可能被改名或换了配置系统）",
+                            false));
                     continue;
                 }
                 write(target, result.content());
@@ -579,8 +597,11 @@ public final class AgentInjector {
             Path target = gameDir.resolve(override.to());
             try {
                 String content = readSource(override.from());
-                write(target, content);
-                actions.add(new Action("file", override.to(), "已整份覆盖（源：" + override.from() + "）", true));
+                boolean wrote = write(target, content);
+                actions.add(new Action("file", override.to(),
+                        wrote ? "已整份覆盖（源：" + override.from() + "）"
+                                : "与源内容一致，未改动（源：" + override.from() + "）",
+                        wrote));
             } catch (IOException ex) {
                 actions.add(new Action("file", override.to(), "覆盖失败：" + ex.getMessage(), false));
             }
@@ -590,10 +611,20 @@ public final class AgentInjector {
             Path target = gameDir.resolve(override.to());
             try {
                 String sample = readSource(override.from());
+                // 空样本 / 样本里没有 keys 行时合并器会原样返回，等于什么都没做；
+                // 这里显式报出来，避免日志上看着"已合并"、实际一个键都没注入。
+                if (isJsonTarget(override.to()) && JsonKeybindMerger.collect(sample).isEmpty()) {
+                    actions.add(new Action("keybinds", override.to(),
+                            "样本里没有任何 keys 行（样本无效），本次键位注入未生效（源："
+                                    + override.from() + "）", false));
+                    continue;
+                }
                 String existing = Files.isRegularFile(target) ? Files.readString(target, StandardCharsets.UTF_8) : "";
-                write(target, mergeKeybinds(override.to(), existing, sample));
+                boolean wrote = write(target, mergeKeybinds(override.to(), existing, sample));
                 actions.add(new Action("keybinds", override.to(),
-                        "已按键位样本合并（源：" + override.from() + "）", true));
+                        wrote ? "已按键位样本合并（源：" + override.from() + "）"
+                                : "键位与样本一致，未改动（源：" + override.from() + "）",
+                        wrote));
             } catch (IOException ex) {
                 actions.add(new Action("keybinds", override.to(), "合并失败：" + ex.getMessage(), false));
             }
@@ -604,9 +635,11 @@ public final class AgentInjector {
             try {
                 String sample = readSource(settings.keybindSource());
                 String existing = Files.isRegularFile(target) ? Files.readString(target, StandardCharsets.UTF_8) : "";
-                write(target, mergeKeybinds(settings.keybindTarget(), existing, sample));
+                boolean wrote = write(target, mergeKeybinds(settings.keybindTarget(), existing, sample));
                 actions.add(new Action("keybinds", settings.keybindTarget(),
-                        "已按键位样本合并（源：" + settings.keybindSource() + "）", true));
+                        wrote ? "已按键位样本合并（源：" + settings.keybindSource() + "）"
+                                : "键位与样本一致，未改动（源：" + settings.keybindSource() + "）",
+                        wrote));
             } catch (IOException ex) {
                 actions.add(new Action("keybinds", settings.keybindTarget(), "合并失败：" + ex.getMessage(), false));
             }
@@ -617,10 +650,15 @@ public final class AgentInjector {
 
     /** 按目标文件类型选择键位合并器：JSON 走路径感知合并，其余按 options.txt 文本行处理。 */
     public static String mergeKeybinds(String targetName, String existing, String sample) {
-        if (targetName != null && targetName.toLowerCase(Locale.ROOT).endsWith(".json")) {
+        if (isJsonTarget(targetName)) {
             return JsonKeybindMerger.merge(existing, sample);
         }
         return KeybindMerger.merge(existing, sample);
+    }
+
+    /** 目标是不是 JSON 配置（决定用哪个合并器，以及要不要检查样本里有没有 keys）。 */
+    public static boolean isJsonTarget(String targetName) {
+        return targetName != null && targetName.toLowerCase(Locale.ROOT).endsWith(".json");
     }
 
     /** 读取源内容：支持 {@code preset:xxx}（jar 内置预设）与绝对路径。 */
@@ -715,15 +753,20 @@ public final class AgentInjector {
         return result;
     }
 
-    /** 写文本；内容一致就不动文件；第一次修改某个文件前先留一份 {@code .configpatcher.bak}。 */
-    private static void write(Path target, String content) throws IOException {
+    /**
+     * 写文本；内容一致就不动文件；第一次修改某个文件前先留一份 {@code .configpatcher.bak}。
+     *
+     * @return 是否真的落盘。内容一致时返回 {@code false}，此时连文件时间戳都不会变 ——
+     *         日志要靠它区分「真的改了」和「本来就一样」，否则每次启动都会谎报"已覆盖/已合并"。
+     */
+    private static boolean write(Path target, String content) throws IOException {
         Path parent = target.getParent();
         if (parent != null) {
             Files.createDirectories(parent);
         }
         if (Files.isRegularFile(target)) {
             if (content.equals(Files.readString(target, StandardCharsets.UTF_8))) {
-                return;
+                return false;
             }
             Path backup = target.resolveSibling(target.getFileName() + BACKUP_SUFFIX);
             if (!Files.isRegularFile(backup)) {
@@ -731,6 +774,7 @@ public final class AgentInjector {
             }
         }
         Files.writeString(target, content, StandardCharsets.UTF_8);
+        return true;
     }
 
     private static boolean sameSize(Path left, Path right) {

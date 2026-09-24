@@ -55,13 +55,36 @@ class TomlValueEditorTest {
 
     @Test
     void unknownSectionOrKeyIsReportedAsUnchanged() {
-        assertFalse(TomlValueEditor.set(AE2, "nope.terminalMargin", "0").changed());
-        assertFalse(TomlValueEditor.set(AE2, "terminals.nope", "0").changed());
+        TomlValueEditor.Result noSection = TomlValueEditor.set(AE2, "nope.terminalMargin", "0");
+        assertFalse(noSection.changed());
+        assertFalse(noSection.found(), "段不存在 → found=false");
+
+        TomlValueEditor.Result noKey = TomlValueEditor.set(AE2, "terminals.nope", "0");
+        assertFalse(noKey.changed());
+        assertFalse(noKey.found(), "段在、键不在 → found=false");
     }
 
     @Test
     void sameValueCountsAsUnchanged() {
-        assertFalse(TomlValueEditor.set(AE2, "terminals.terminalMargin", "25").changed());
+        TomlValueEditor.Result result = TomlValueEditor.set(AE2, "terminals.terminalMargin", "25");
+        assertFalse(result.changed());
+        assertTrue(result.found(), "键存在、值已是目标值 → found=true");
+        assertTrue(result.alreadyUpToDate());
+    }
+
+    @Test
+    void blankKeyIsReportedAsNotFound() {
+        TomlValueEditor.Result result = TomlValueEditor.set(AE2, "  ", "0");
+        assertFalse(result.changed());
+        assertFalse(result.found());
+    }
+
+    @Test
+    void appliedEditIsBothChangedAndFound() {
+        TomlValueEditor.Result result = TomlValueEditor.set(AE2, "terminals.terminalMargin", "0");
+        assertTrue(result.changed());
+        assertTrue(result.found());
+        assertFalse(result.alreadyUpToDate());
     }
 
     @Test

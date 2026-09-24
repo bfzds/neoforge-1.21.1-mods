@@ -1,5 +1,6 @@
 package dev.configpatcher;
 
+import dev.configpatcher.agent.SessionMarker;
 import dev.configpatcher.command.ConfigPatcherCommand;
 import dev.configpatcher.engine.PatchEngine;
 import net.neoforged.bus.api.IEventBus;
@@ -7,6 +8,7 @@ import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
 
@@ -44,6 +46,13 @@ public final class ConfigPatcher {
 
     private static void onCommonSetup(FMLCommonSetupEvent event) {
         event.enqueueWork(() -> {
+            // 游戏真的走到「mod 加载完成」这一步了：给 Agent 的退出钩子一个「可以回写样本」的凭据。
+            // mod 加载失败（例如缺前置）时这里根本不会执行，退出钩子就会跳过回写 ——
+            // 这正是 2026-09-24 那次事故（tweakeroo 键位被 1 字节空样本带坏）的防线。
+            if (!SessionMarker.markStarted(FMLPaths.GAMEDIR.get())) {
+                Log.LOGGER.warn("没能写出本次启动标记（config/configpatcher/session.ok），"
+                        + "本次退出不会回写样本库");
+            }
             PatchEngine.summarize();
             // 文件层规则补跑：目标 mod 用自己的配置系统时不会触发 ModConfigEvent，
             // 这类规则（handler = toml-file）在这里按文件名直接执行一次。
