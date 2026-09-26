@@ -12,8 +12,6 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 「关闭游戏自动导出」的回写逻辑：实例 → 样本。 */
@@ -131,54 +129,7 @@ class SampleExporterTest {
         assertFalse(actions.get(0).changed());
     }
 
-    // ------------------------------------------------------------------ 回写前的健康检查
-
-    @Test
-    void rejectReasonBlocksTinyFile() {
-        // 2026-09-24 那次事故的真身：崩溃退出时实例里只剩一个换行符
-        assertNotNull(SampleExporter.rejectReason("config/tweakeroo.json", true, "\n"));
-        assertNotNull(SampleExporter.rejectReason("config/tweakeroo.json", true, ""));
-        assertNotNull(SampleExporter.rejectReason("config/tweakeroo.json", true, "   \n  "));
-    }
-
-    @Test
-    void rejectReasonBlocksBrokenJson() {
-        assertNotNull(SampleExporter.rejectReason("config/tweakeroo.json", true, "这不是 JSON"));
-        assertNotNull(SampleExporter.rejectReason("config/tweakeroo.json", true, "{\"a\": 1"));
-        assertNotNull(SampleExporter.rejectReason("config/tweakeroo.json", true, "{\"a\": \"未闭合}"));
-    }
-
-    @Test
-    void rejectReasonBlocksKeybindJsonWithoutEnoughKeys() {
-        // 结构合法，但 keys 行太少 —— 典型的半成品
-        String thin = "{\n  \"GenericHotkeys\": {\n    \"first\": {\n      \"keys\": \"LEFT_CONTROL\"\n    }\n  }\n}\n";
-        String reason = SampleExporter.rejectReason("config/tweakeroo.json", true, thin);
-        assertNotNull(reason);
-        assertTrue(reason.contains("keys"), reason);
-    }
-
-    @Test
-    void rejectReasonAllowsNormalSmallNonKeybindJson() {
-        // recipe_type_names.json 只有 1.8 KB、也没有 keys 行，不能被 keys 检查误伤
-        String recipe = "{\n  \"extendedae_plus:assembler\": \"组装机\",\n  \"gtceu:assembler\": \"组装机\"\n}\n";
-        assertNull(SampleExporter.rejectReason("config/extendedae_plus/recipe_type_names.json", false, recipe));
-        // 同一份内容当成键位文件就该被拦下
-        assertNotNull(SampleExporter.rejectReason("config/recipe_type_names.json", true, recipe));
-    }
-
-    @Test
-    void rejectReasonAllowsHealthyKeybindSample() {
-        assertNull(SampleExporter.rejectReason("config/tweakeroo.json", true, keybindSample("LEFT_CONTROL")));
-    }
-
-    @Test
-    void balancedDetectsTruncatedJson() {
-        assertTrue(SampleExporter.balanced("{\"a\": [1, 2], \"b\": \"含\\\"转义\"}"));
-        assertFalse(SampleExporter.balanced("{\"a\": [1, 2"));
-        assertFalse(SampleExporter.balanced("{\"a\": \"未闭合}"));
-        assertFalse(SampleExporter.balanced("}"));
-    }
-
+    /** 复刻 2026-09-24 的事故：实例里只剩一个换行符，绝不能让它覆盖样本。 */
     @Test
     void brokenInstanceFileNeverOverwritesSample(@TempDir Path instance, @TempDir Path library) throws IOException {
         String good = keybindSample("LEFT_CONTROL");
@@ -187,7 +138,6 @@ class SampleExporterTest {
 
         Path targetDir = instance.resolve("config");
         Files.createDirectories(targetDir);
-        // 模拟崩溃退出：实例里那份只剩一个换行符
         Files.writeString(targetDir.resolve("tweakeroo.json"), "\n", StandardCharsets.UTF_8);
 
         var actions = SampleExporter.export(instance, settings(null, "options.txt",

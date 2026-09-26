@@ -207,4 +207,41 @@ class AgentInjectorTest {
         assertTrue(result.contains("\"keys\": \"\""), "预设里为空的热键应对齐成空");
         assertFalse(result.contains("\"keys\": \"P\""), "预设里为空的热键不应保留实例旧值");
     }
+
+    /**
+     * 复刻 2026-09-26 的事故：新实例首次启动时目标文件还不存在。
+     * 当时合并器对空目标输出一个换行符，目标 mod 读不懂，键位被整体打回默认配置。
+     */
+    @Test
+    void missingJsonTargetGetsUsableConfig(@TempDir Path instance) throws IOException {
+        AgentInjector.Settings parsed = settings(List.of(), List.of(), false, List.of(),
+                List.of(new AgentInjector.FileOverride("preset:tweakeroo.json", "config/tweakeroo.json")),
+                null);
+        AgentInjector.applyFileOverrides(instance, parsed, new ArrayList<>());
+
+        Path target = instance.resolve("config/tweakeroo.json");
+        String written = Files.readString(target, StandardCharsets.UTF_8);
+        assertTrue(written.stripLeading().startsWith("{"), "目标不存在时不能写出坏文件：" + written);
+        long keys = written.lines().filter(line -> line.trim().startsWith("\"keys\"")).count();
+        assertTrue(keys >= 100, "写出来的应该是完整键位文件，实际 keys 行=" + keys);
+        assertTrue(written.contains("\"keys\": \"LEFT_CONTROL\""), "预设里的键位应该被注入");
+    }
+
+    /** 样本不可用时（这里用没有 keys 行的 recipe 预设当样本），宁可什么都不做，也不能往目标里写坏内容。 */
+    @Test
+    void unusableSampleLeavesTargetUntouched(@TempDir Path instance) throws IOException {
+        Files.createDirectories(instance.resolve("config"));
+        String original = "{\n  \"keep\": 1\n}\n";
+        Files.writeString(instance.resolve("config/tweakeroo.json"), original, StandardCharsets.UTF_8);
+
+        AgentInjector.Settings parsed = settings(List.of(), List.of(), false, List.of(),
+                List.of(new AgentInjector.FileOverride("preset:recipe_type_names.json", "config/tweakeroo.json")),
+                null);
+        List<AgentInjector.Action> actions = new ArrayList<>();
+        AgentInjector.applyFileOverrides(instance, parsed, actions);
+
+        assertEquals(original, Files.readString(instance.resolve("config/tweakeroo.json"), StandardCharsets.UTF_8));
+        assertTrue(actions.stream().anyMatch(a -> a.detail().contains("没有任何 keys 行")),
+                "应明确报出样本无效：" + actions);
+    }
 }

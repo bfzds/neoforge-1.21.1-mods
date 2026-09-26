@@ -620,7 +620,16 @@ public final class AgentInjector {
                     continue;
                 }
                 String existing = Files.isRegularFile(target) ? Files.readString(target, StandardCharsets.UTF_8) : "";
-                boolean wrote = write(target, mergeKeybinds(override.to(), existing, sample));
+                String merged = mergeKeybinds(override.to(), existing, sample);
+                // 写盘前再验一次结果：目标 mod 读不懂这个文件，就会整体回落到默认配置
+                String unusable = ConfigFileGuard.rejectMergedResult(override.to(), merged);
+                if (unusable != null) {
+                    actions.add(new Action("keybinds", override.to(),
+                            "合并结果不可用（" + unusable + "），已放弃写入，目标文件保持不变（源："
+                                    + override.from() + "）", false));
+                    continue;
+                }
+                boolean wrote = write(target, merged);
                 actions.add(new Action("keybinds", override.to(),
                         wrote ? "已按键位样本合并（源：" + override.from() + "）"
                                 : "键位与样本一致，未改动（源：" + override.from() + "）",
@@ -635,7 +644,15 @@ public final class AgentInjector {
             try {
                 String sample = readSource(settings.keybindSource());
                 String existing = Files.isRegularFile(target) ? Files.readString(target, StandardCharsets.UTF_8) : "";
-                boolean wrote = write(target, mergeKeybinds(settings.keybindTarget(), existing, sample));
+                String merged = mergeKeybinds(settings.keybindTarget(), existing, sample);
+                String unusable = ConfigFileGuard.rejectMergedResult(settings.keybindTarget(), merged);
+                if (unusable != null) {
+                    actions.add(new Action("keybinds", settings.keybindTarget(),
+                            "合并结果不可用（" + unusable + "），已放弃写入，目标文件保持不变（源："
+                                    + settings.keybindSource() + "）", false));
+                    return;
+                }
+                boolean wrote = write(target, merged);
                 actions.add(new Action("keybinds", settings.keybindTarget(),
                         wrote ? "已按键位样本合并（源：" + settings.keybindSource() + "）"
                                 : "键位与样本一致，未改动（源：" + settings.keybindSource() + "）",

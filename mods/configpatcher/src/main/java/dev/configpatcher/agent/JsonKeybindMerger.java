@@ -33,11 +33,26 @@ public final class JsonKeybindMerger {
     private JsonKeybindMerger() {
     }
 
-    /** 用样本里的键位覆盖目标文件；目标里样本没有的键位按「文件为准」清空为样本缺失时的处理方式保留原值。 */
+    /**
+     * 用样本里的键位覆盖目标文件。
+     *
+     * <p>有两种情况「没法逐行替换」，这时**整份采用样本**：
+     * <ul>
+     *     <li>目标文件不存在 / 为空 / 已被写坏（不是完整的 JSON 对象）；</li>
+     *     <li>目标文件里一条 {@code "keys"} 行都没有。</li>
+     * </ul>
+     * 真实事故：新实例首次启动时 {@code config/tweakeroo.json} 还不存在，逐行替换没有任何行可改，
+     * 结果输出一个只剩换行符的 1 字节文件；目标 mod 读不懂，键位被整体打回默认配置。
+     *
+     * <p>其余情况按「文件为准、只改键位行」处理，目标里的其它开关与注释一律保留。
+     */
     public static String merge(String existing, String sample) {
         Map<String, String> wanted = collect(sample);
         if (wanted.isEmpty()) {
-            return existing.endsWith("\n") ? existing : existing + "\n";
+            return ensureTrailingNewline(existing);
+        }
+        if (!canPatchInPlace(existing)) {
+            return ensureTrailingNewline(sample);
         }
 
         List<String> lines = new ArrayList<>(existing.lines().toList());
@@ -74,6 +89,26 @@ public final class JsonKeybindMerger {
             }
         }
         return String.join("\n", lines) + "\n";
+    }
+
+    /**
+     * 目标文件能不能作为「逐行替换」的基础：必须是看起来完整的 JSON 对象，
+     * 而且里面真的存在 {@code "keys"} 行。
+     */
+    static boolean canPatchInPlace(String existing) {
+        if (existing == null) {
+            return false;
+        }
+        String body = existing.strip();
+        if (body.isEmpty() || !body.startsWith("{") || !ConfigFileGuard.balanced(body)) {
+            return false;
+        }
+        return !collect(existing).isEmpty();
+    }
+
+    private static String ensureTrailingNewline(String text) {
+        String value = text == null ? "" : text;
+        return value.endsWith("\n") ? value : value + "\n";
     }
 
     /** 收集 {@code 路径 → keys 值}（路径形如 {@code Generic>entityDataSync>hotkey>keys}）。 */

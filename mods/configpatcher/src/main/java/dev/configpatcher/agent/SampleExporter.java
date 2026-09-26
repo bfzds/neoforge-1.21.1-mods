@@ -127,7 +127,7 @@ public final class SampleExporter {
         }
         try {
             String content = Files.readString(target, StandardCharsets.UTF_8);
-            String reject = rejectReason(override.to(), keybindFile, content);
+            String reject = ConfigFileGuard.rejectReason(override.to(), keybindFile, content);
             if (reject != null) {
                 // 崩溃 / 启动失败退出时实例里可能只剩半成品，整份回写会把样本带坏 —— 直接跳过
                 actions.add(new AgentInjector.Action("export", nameOf(override.from()),
@@ -143,84 +143,8 @@ public final class SampleExporter {
         }
     }
 
-    /** 键位样本至少要有的 {@code "keys"} 行数；真实样本有 247 行，低于这个数基本可以断定是半成品。 */
-    private static final int MIN_KEY_LINES = 100;
-
-    /**
-     * 回写前的健康检查：返回拒绝原因，{@code null} 表示通过。
-     *
-     * <p>起因：崩溃 / mod 加载失败时游戏照样会触发退出钩子，而那时实例里的配置文件可能是半成品
-     * （真实案例：{@code tweakeroo.json} 只剩一个换行符 0x0A）。导出是「整份覆盖样本」，
-     * 一旦写下去，样本库就废了，之后所有实例的键位注入都会静默失效。所以宁可少写一次。
-     *
-     * @param relativePath 实例内的相对路径（用来判断文件类型）
-     * @param keybindFile  这一项是不是键位文件（键位文件才检查 {@code "keys"} 行数，
-     *                     否则会误伤 {@code recipe_type_names.json} 这类没有 keys 的正常文件）
-     */
-    static String rejectReason(String relativePath, boolean keybindFile, String content) {
-        if (content == null || content.isBlank()) {
-            return "内容为空或只有空白";
-        }
-        String lower = relativePath == null ? "" : relativePath.toLowerCase(Locale.ROOT);
-        if (lower.endsWith(".json")) {
-            String body = content.strip();
-            if (!body.startsWith("{")) {
-                return "不是 JSON 对象（首字符不是 {）";
-            }
-            if (!balanced(body)) {
-                return "JSON 括号或引号不配对，疑似写了一半";
-            }
-        }
-        if (keybindFile && lower.endsWith(".json")) {
-            long keys = content.lines()
-                    .filter(line -> line.trim().startsWith("\"keys\""))
-                    .count();
-            if (keys < MIN_KEY_LINES) {
-                return "keys 行只有 " + keys + " 行（少于 " + MIN_KEY_LINES + "），疑似半成品";
-            }
-        }
-        return null;
-    }
-
-    /** 花括号 / 方括号 / 引号是否配平（跳过字符串内部与转义字符）。 */
-    static boolean balanced(String text) {
-        int brace = 0;
-        int bracket = 0;
-        boolean inString = false;
-        boolean escaped = false;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (inString) {
-                if (escaped) {
-                    escaped = false;
-                } else if (c == '\\') {
-                    escaped = true;
-                } else if (c == '"') {
-                    inString = false;
-                }
-                continue;
-            }
-            switch (c) {
-                case '"' -> inString = true;
-                case '{' -> brace++;
-                case '}' -> {
-                    if (--brace < 0) {
-                        return false;
-                    }
-                }
-                case '[' -> bracket++;
-                case ']' -> {
-                    if (--bracket < 0) {
-                        return false;
-                    }
-                }
-                default -> {
-                    // 其它字符与配对无关
-                }
-            }
-        }
-        return !inString && brace == 0 && bracket == 0;
-    }
+    // 内容健康检查（rejectReason / balanced / MIN_KEY_LINES）已抽到 ConfigFileGuard：
+    // 导出方向（实例 → 样本）与注入方向（样本 → 实例）共用同一套规则。
 
     /** 样本「源」是不是可以写回的真实文件路径（{@code preset:} 是 jar 内置只读预设，写不回去）。 */
     static boolean isWritableSource(String spec) {
