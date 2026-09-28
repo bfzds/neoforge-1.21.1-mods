@@ -12,9 +12,11 @@ import java.util.Set;
  * 键位合并。
  *
  * <p>整份覆盖 {@code options.txt} 会连带改掉分辨率、语言、视野等一堆无关设置，
- * 所以这里只做「键位 + 资源包」这两件事：
+ * 所以这里只做「键位 + 声音 + 资源包」这几件事：
  * <ul>
  *     <li>把样本里所有 {@code key_xxx:...} 行写进目标文件（目标缺的键补上，目标多的键保留）；</li>
+ *     <li>声音设置同样按行合并：{@code soundCategory_xxx:...}（音量滑条）与
+ *         {@code soundDevice:...}（输出设备），规则与键位一致；</li>
  *     <li>把注入的资源包名追加进 {@code resourcePacks}，并从 {@code incompatibleResourcePacks} 里移除，
  *         保证材质包能被游戏真正启用。</li>
  * </ul>
@@ -24,18 +26,20 @@ import java.util.Set;
 public final class KeybindMerger {
 
     private static final String KEY_PREFIX = "key_";
+    private static final String SOUND_CATEGORY_PREFIX = "soundCategory_";
+    private static final String SOUND_DEVICE_KEY = "soundDevice";
     private static final String RESOURCE_PACKS = "resourcePacks:";
     private static final String INCOMPATIBLE = "incompatibleResourcePacks:";
 
     private KeybindMerger() {
     }
 
-    /** 用样本里的键位覆盖 / 补全目标 options.txt 的内容，其余设置原样保留。 */
+    /** 用样本里的键位 / 声音设置覆盖 / 补全目标 options.txt 的内容，其余设置原样保留。 */
     public static String merge(String existing, String sample) {
         Map<String, String> wanted = new LinkedHashMap<>();
         for (String line : sample.lines().toList()) {
             String trimmed = line.trim();
-            if (trimmed.startsWith(KEY_PREFIX) && trimmed.indexOf(':') > 0) {
+            if (isCarriedLine(trimmed) && trimmed.indexOf(':') > 0) {
                 wanted.put(keyOf(trimmed), trimmed);
             }
         }
@@ -48,7 +52,7 @@ public final class KeybindMerger {
         for (int i = 0; i < lines.size(); i++) {
             String trimmed = lines.get(i).trim();
             String key = keyOf(trimmed);
-            if (trimmed.startsWith(KEY_PREFIX) && wanted.containsKey(key)) {
+            if (isCarriedLine(trimmed) && wanted.containsKey(key)) {
                 lines.set(i, wanted.get(key));
                 applied.add(key);
             }
@@ -66,7 +70,7 @@ public final class KeybindMerger {
      *
      * <p>与 {@link #merge(String, String)}（注入：样本 → 实例）正好相反，这是导出方向（实例 → 样本）：
      * <ul>
-     *     <li>实例里存在且与全局不同的 {@code key_*} 行 —— 原位更新进全局（保持全局的行顺序）；</li>
+     *     <li>实例里存在且与全局不同的键位 / 声音行 —— 原位更新进全局（保持全局的行顺序）；</li>
      *     <li>实例有、全局没有的键 —— 追加到全局末尾；</li>
      *     <li>全局有、实例没有的键 —— 原样保留，绝不删除。</li>
      * </ul>
@@ -75,13 +79,13 @@ public final class KeybindMerger {
      * 全局键位曾被从 528 条砍到 464 条）。实例没有键位行时原样返回全局。
      *
      * @param global   全局样本当前内容（null / 空串也可以，此时结果就是实例的键位行）
-     * @param instance 实例的键位内容（只取其中的 {@code key_*} 行）
+     * @param instance 实例的内容（只取其中的键位 / 声音行）
      */
     public static String mergeIntoGlobal(String global, String instance) {
         Map<String, String> fromInstance = new LinkedHashMap<>();
         for (String line : instance.lines().toList()) {
             String trimmed = line.trim();
-            if (trimmed.startsWith(KEY_PREFIX) && trimmed.indexOf(':') > 0) {
+            if (isCarriedLine(trimmed) && trimmed.indexOf(':') > 0) {
                 fromInstance.put(keyOf(trimmed), trimmed);
             }
         }
@@ -93,7 +97,7 @@ public final class KeybindMerger {
         for (int i = 0; i < lines.size(); i++) {
             String trimmed = lines.get(i).trim();
             String key = keyOf(trimmed);
-            if (trimmed.startsWith(KEY_PREFIX) && fromInstance.containsKey(key)) {
+            if (isCarriedLine(trimmed) && fromInstance.containsKey(key)) {
                 lines.set(i, fromInstance.get(key));
                 applied.add(key);
             }
@@ -134,6 +138,13 @@ public final class KeybindMerger {
             lines.add(RESOURCE_PACKS + toJson(new ArrayList<>(packNames)));
         }
         return join(lines);
+    }
+
+    /** 这一行是不是要随样本走的内容：键位行 / 声音音量行 / 声音输出设备行。 */
+    static boolean isCarriedLine(String trimmed) {
+        return trimmed.startsWith(KEY_PREFIX)
+                || trimmed.startsWith(SOUND_CATEGORY_PREFIX)
+                || trimmed.startsWith(SOUND_DEVICE_KEY);
     }
 
     private static String keyOf(String line) {

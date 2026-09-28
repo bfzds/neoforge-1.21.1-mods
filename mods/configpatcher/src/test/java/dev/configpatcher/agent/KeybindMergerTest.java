@@ -74,4 +74,41 @@ class KeybindMergerTest {
         assertEquals(List.of("vanilla", "file/a b.zip"), KeybindMerger.parseList("[\"vanilla\",\"file/a b.zip\"]"));
         assertEquals("[\"a\",\"b\"]", KeybindMerger.toJson(List.of("a", "b")));
     }
+
+    /** 注入方向：声音设置（音量滑条 + 输出设备）与键位走同一套「覆盖 + 补全」规则。 */
+    @Test
+    void soundSettingsAreMergedLikeKeybinds() {
+        String existing = """
+                version:3953
+                soundCategory_master:1.0
+                soundCategory_music:0.5
+                soundDevice:""
+                """;
+        String sample = """
+                key_key.forward:key.keyboard.w
+                soundCategory_master:0.0
+                soundCategory_hostile:0.2
+                soundDevice:"HEADSET"
+                """;
+
+        String merged = KeybindMerger.merge(existing, sample);
+
+        assertTrue(merged.contains("soundCategory_master:0.0"), "样本声音值应覆盖原值");
+        assertTrue(merged.contains("soundCategory_music:0.5"), "样本里没有的声音项应保留原样");
+        assertTrue(merged.contains("soundCategory_hostile:0.2"), "目标缺失的声音项应补上");
+        assertTrue(merged.contains("soundDevice:\"HEADSET\""), "输出设备应随样本更新");
+        assertTrue(merged.contains("version:3953"), "非键位/声音设置必须原样保留");
+    }
+
+    /** 回流方向（口径 A）：实例的声音值按只增改并入全局，全局多出来的键位不动。 */
+    @Test
+    void mergeIntoGlobalCarriesSoundSettings() {
+        String global = "key_key.attack:key.keyboard.a\nsoundCategory_master:1.0\n";
+        String instance = "key_key.attack:key.keyboard.f\nsoundCategory_master:0.0\nsoundCategory_voice:0.3\n";
+
+        String merged = KeybindMerger.mergeIntoGlobal(global, instance);
+
+        assertEquals("key_key.attack:key.keyboard.f\nsoundCategory_master:0.0\nsoundCategory_voice:0.3\n",
+                merged, "实例的声音值应按只增改并入全局");
+    }
 }

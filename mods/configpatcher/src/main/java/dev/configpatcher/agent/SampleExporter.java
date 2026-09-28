@@ -19,8 +19,8 @@ import java.util.Locale;
  *
  * <h2>导出哪些</h2>
  * <ul>
- *     <li>{@code keybindSource} / {@code keybindTarget}：把实例 {@code options.txt} 里的 {@code key_*} 行
- *         按「只增改」并入键位样本（分辨率、语言等无关设置不带进样本，实例没有的键位保留样本原值）；</li>
+ *     <li>{@code keybindSource} / {@code keybindTarget}：把实例 {@code options.txt} 里的键位与声音行
+ *         按「只增改」并入键位/声音样本（分辨率、语言等无关设置不带进样本，实例没有的键位保留样本原值）；</li>
  *     <li>{@code keybindFileOverrides}：把实例里的目标文件整份回写成样本（如 tweakeroo.json）；</li>
  *     <li>{@code fileOverrides}：同上（如 recipe_type_names.json）。</li>
  * </ul>
@@ -74,7 +74,7 @@ public final class SampleExporter {
         return actions;
     }
 
-    /** 键位样本：把实例 options.txt 里的 {@code key_*} 行按「只增改」合并进全局样本（口径 A）。 */
+    /** 键位/声音样本：把实例 options.txt 里的键位与声音行按「只增改」合并进全局样本（口径 A）。 */
     private static void exportKeybindSample(Path gameDir, AgentInjector.Settings settings,
                                             List<AgentInjector.Action> actions) {
         String source = settings.keybindSource();
@@ -93,13 +93,13 @@ public final class SampleExporter {
         try {
             List<String> keyLines = new ArrayList<>();
             for (String line : Files.readAllLines(target, StandardCharsets.UTF_8)) {
-                if (line.trim().startsWith("key_")) {
+                if (KeybindMerger.isCarriedLine(line.trim())) {
                     keyLines.add(line);
                 }
             }
             if (keyLines.isEmpty()) {
                 actions.add(new AgentInjector.Action("export", nameOf(source),
-                        targetName + " 里没有键位行，跳过", false));
+                        targetName + " 里没有键位/声音行，跳过", false));
                 return;
             }
             // 崩溃 / 启动失败退出时实例的键位表可能是半成品，绝不能并进全局
@@ -114,21 +114,21 @@ public final class SampleExporter {
             String global = Files.isRegularFile(sample)
                     ? Files.readString(sample, StandardCharsets.UTF_8)
                     : "";
-            long before = countKeyLines(global);
+            long before = countCarriedLines(global);
             String merged = KeybindMerger.mergeIntoGlobal(global, instanceContent);
-            long after = countKeyLines(merged);
+            long after = countCarriedLines(merged);
             boolean written = backupAndWrite(sample, merged);
             actions.add(new AgentInjector.Action("export", nameOf(source),
-                    written ? "已按键位样本合并：全局 " + before + " → " + after + " 条"
+                    written ? "已按键位/声音样本合并：全局 " + before + " → " + after + " 条"
                             : "与样本一致，无需回写", written));
         } catch (IOException ex) {
             actions.add(new AgentInjector.Action("export", nameOf(source), "回写失败：" + ex.getMessage(), false));
         }
     }
 
-    private static long countKeyLines(String content) {
+    private static long countCarriedLines(String content) {
         return content == null ? 0
-                : content.lines().filter(line -> line.trim().startsWith("key_")).count();
+                : content.lines().filter(line -> KeybindMerger.isCarriedLine(line.trim())).count();
     }
 
     /**

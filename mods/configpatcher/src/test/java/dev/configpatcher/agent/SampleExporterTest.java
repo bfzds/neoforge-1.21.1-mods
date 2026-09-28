@@ -121,6 +121,23 @@ class SampleExporterTest {
         assertTrue(actions.get(0).changed());
     }
 
+    /** 声音设置随键位一起回流（口径 A 同款只增改）：改过的更新、新增的追加。 */
+    @Test
+    void soundSettingsMergeIntoSample(@TempDir Path instance, @TempDir Path library) throws IOException {
+        Path sample = library.resolve("options.txt");
+        Files.writeString(sample, "key_key.attack:key.keyboard.a\nsoundCategory_master:1.0\n",
+                StandardCharsets.UTF_8);
+        Files.writeString(instance.resolve("options.txt"),
+                "key_key.attack:key.keyboard.f\nsoundCategory_master:0.0\nsoundCategory_music:0.0\n",
+                StandardCharsets.UTF_8);
+
+        SampleExporter.export(instance,
+                settings(sample.toString(), "options.txt", List.of(), List.of()));
+
+        assertEquals("key_key.attack:key.keyboard.f\nsoundCategory_master:0.0\nsoundCategory_music:0.0\n",
+                Files.readString(sample, StandardCharsets.UTF_8));
+    }
+
     @Test
     void fileOverrideIsCopiedBack(@TempDir Path instance, @TempDir Path library) throws IOException {
         String content = keybindSample("LEFT_CONTROL");
