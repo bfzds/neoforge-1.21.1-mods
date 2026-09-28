@@ -36,6 +36,23 @@ public final class KeybindMerger {
 
     /** 用样本里的键位 / 声音设置覆盖 / 补全目标 options.txt 的内容，其余设置原样保留。 */
     public static String merge(String existing, String sample) {
+        return mergeWithStats(existing, sample).content();
+    }
+
+    /** 合并结果与影响统计：键位 / 声音分别计数「原位更新」与「末尾补齐」（值本来一样的行不算）。 */
+    public record MergeStats(String content, int keyUpdated, int keyAdded, int soundUpdated, int soundAdded) {
+
+        public int totalUpdated() {
+            return keyUpdated + soundUpdated;
+        }
+
+        public int totalAdded() {
+            return keyAdded + soundAdded;
+        }
+    }
+
+    /** 同 {@link #merge(String, String)}，额外返回实际影响（供聊天栏摘要 / 日志使用）。 */
+    public static MergeStats mergeWithStats(String existing, String sample) {
         Map<String, String> wanted = new LinkedHashMap<>();
         for (String line : sample.lines().toList()) {
             String trimmed = line.trim();
@@ -45,24 +62,44 @@ public final class KeybindMerger {
         }
         List<String> lines = new ArrayList<>(existing.lines().toList());
         if (wanted.isEmpty()) {
-            return join(lines);
+            return new MergeStats(join(lines), 0, 0, 0, 0);
         }
 
         Set<String> applied = new LinkedHashSet<>();
+        int keyUpdated = 0;
+        int keyAdded = 0;
+        int soundUpdated = 0;
+        int soundAdded = 0;
         for (int i = 0; i < lines.size(); i++) {
             String trimmed = lines.get(i).trim();
             String key = keyOf(trimmed);
             if (isCarriedLine(trimmed) && wanted.containsKey(key)) {
+                if (!trimmed.equals(wanted.get(key))) {
+                    if (isSoundKey(key)) {
+                        soundUpdated++;
+                    } else {
+                        keyUpdated++;
+                    }
+                }
                 lines.set(i, wanted.get(key));
                 applied.add(key);
             }
         }
         for (Map.Entry<String, String> entry : wanted.entrySet()) {
             if (!applied.contains(entry.getKey())) {
+                if (isSoundKey(entry.getKey())) {
+                    soundAdded++;
+                } else {
+                    keyAdded++;
+                }
                 lines.add(entry.getValue());
             }
         }
-        return join(lines);
+        return new MergeStats(join(lines), keyUpdated, keyAdded, soundUpdated, soundAdded);
+    }
+
+    private static boolean isSoundKey(String key) {
+        return key.startsWith(SOUND_CATEGORY_PREFIX) || key.equals(SOUND_DEVICE_KEY);
     }
 
     /**

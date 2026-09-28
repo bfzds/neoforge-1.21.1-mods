@@ -81,10 +81,19 @@ public final class SessionReport {
                 result.add("……其余 " + (list.size() - shown) + " 项见 agent.log");
                 return result;
             }
-            result.add(glyph(action) + " " + action.detail());
+            result.add(glyph(action) + " " + friendly(action));
             shown++;
         }
         return result;
+    }
+
+    /** 聊天栏一行：带上目标（配置文件 / mod 文件名），让影响落在哪一眼可见。 */
+    private static String friendly(AgentInjector.Action action) {
+        String name = action.name();
+        if (name == null || name.isBlank() || "-".equals(name)) {
+            return action.detail();
+        }
+        return name + "：" + action.detail();
     }
 
     private static String glyph(AgentInjector.Action action) {

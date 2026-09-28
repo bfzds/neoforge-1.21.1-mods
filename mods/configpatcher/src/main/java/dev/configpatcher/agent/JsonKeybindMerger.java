@@ -47,16 +47,26 @@ public final class JsonKeybindMerger {
      * <p>其余情况按「文件为准、只改键位行」处理，目标里的其它开关与注释一律保留。
      */
     public static String merge(String existing, String sample) {
+        return mergeWithStats(existing, sample).content();
+    }
+
+    /** 合并结果与影响统计：changed = 按键位路径真的改了值的行数；total = 样本里的键位路径总数。 */
+    public record MergeStats(String content, int changed, int total) {
+    }
+
+    /** 同 {@link #merge(String, String)}，额外返回实际影响（供聊天栏摘要 / 日志使用）。 */
+    public static MergeStats mergeWithStats(String existing, String sample) {
         Map<String, String> wanted = collect(sample);
         if (wanted.isEmpty()) {
-            return ensureTrailingNewline(existing);
+            return new MergeStats(ensureTrailingNewline(existing), 0, 0);
         }
         if (!canPatchInPlace(existing)) {
-            return ensureTrailingNewline(sample);
+            return new MergeStats(ensureTrailingNewline(sample), wanted.size(), wanted.size());
         }
 
         List<String> lines = new ArrayList<>(existing.lines().toList());
         Deque<String> stack = new ArrayDeque<>();
+        int changed = 0;
         for (int i = 0; i < lines.size(); i++) {
             String line = lines.get(i);
             String trimmed = line.trim();
@@ -84,11 +94,15 @@ public final class JsonKeybindMerger {
                 String path = pathOf(stack);
                 String replacement = wanted.get(path);
                 if (replacement != null) {
-                    lines.set(i, replaceValue(line, replacement));
+                    String rewritten = replaceValue(line, replacement);
+                    if (!rewritten.equals(line)) {
+                        changed++;
+                    }
+                    lines.set(i, rewritten);
                 }
             }
         }
-        return String.join("\n", lines) + "\n";
+        return new MergeStats(String.join("\n", lines) + "\n", changed, wanted.size());
     }
 
     /**

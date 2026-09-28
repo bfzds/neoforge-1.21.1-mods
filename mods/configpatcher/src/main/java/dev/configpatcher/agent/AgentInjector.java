@@ -598,9 +598,10 @@ public final class AgentInjector {
             try {
                 String content = readSource(override.from());
                 boolean wrote = write(target, content);
+                int entries = countEntries(content);
                 actions.add(new Action("file", override.to(),
-                        wrote ? "已整份覆盖（源：" + override.from() + "）"
-                                : "与源内容一致，未改动（源：" + override.from() + "）",
+                        wrote ? (entries > 0 ? "已整份覆盖（" + entries + " 条条目）" : "已整份覆盖")
+                                : "内容与样本一致，未改动",
                         wrote));
             } catch (IOException ex) {
                 actions.add(new Action("file", override.to(), "覆盖失败：" + ex.getMessage(), false));
@@ -615,24 +616,21 @@ public final class AgentInjector {
                 // 这里显式报出来，避免日志上看着"已合并"、实际一个键都没注入。
                 if (isJsonTarget(override.to()) && JsonKeybindMerger.collect(sample).isEmpty()) {
                     actions.add(new Action("keybinds", override.to(),
-                            "样本里没有任何 keys 行（样本无效），本次键位注入未生效（源："
-                                    + override.from() + "）", false));
+                            "样本里没有任何 keys 行（样本无效），本次键位注入未生效", false));
                     continue;
                 }
                 String existing = Files.isRegularFile(target) ? Files.readString(target, StandardCharsets.UTF_8) : "";
-                String merged = mergeKeybinds(override.to(), existing, sample);
+                MergedKeybinds result = mergeKeybindsWithImpact(override.to(), existing, sample);
                 // 写盘前再验一次结果：目标 mod 读不懂这个文件，就会整体回落到默认配置
-                String unusable = ConfigFileGuard.rejectMergedResult(override.to(), merged);
+                String unusable = ConfigFileGuard.rejectMergedResult(override.to(), result.content());
                 if (unusable != null) {
                     actions.add(new Action("keybinds", override.to(),
-                            "合并结果不可用（" + unusable + "），已放弃写入，目标文件保持不变（源："
-                                    + override.from() + "）", false));
+                            "合并结果不可用（" + unusable + "），已放弃写入，目标文件保持不变", false));
                     continue;
                 }
-                boolean wrote = write(target, merged);
+                boolean wrote = write(target, result.content());
                 actions.add(new Action("keybinds", override.to(),
-                        wrote ? "已按键位样本合并（源：" + override.from() + "）"
-                                : "键位与样本一致，未改动（源：" + override.from() + "）",
+                        wrote ? result.impact() : "键位与样本一致，未改动",
                         wrote));
             } catch (IOException ex) {
                 actions.add(new Action("keybinds", override.to(), "合并失败：" + ex.getMessage(), false));
@@ -644,18 +642,16 @@ public final class AgentInjector {
             try {
                 String sample = readSource(settings.keybindSource());
                 String existing = Files.isRegularFile(target) ? Files.readString(target, StandardCharsets.UTF_8) : "";
-                String merged = mergeKeybinds(settings.keybindTarget(), existing, sample);
-                String unusable = ConfigFileGuard.rejectMergedResult(settings.keybindTarget(), merged);
+                MergedKeybinds result = mergeKeybindsWithImpact(settings.keybindTarget(), existing, sample);
+                String unusable = ConfigFileGuard.rejectMergedResult(settings.keybindTarget(), result.content());
                 if (unusable != null) {
                     actions.add(new Action("keybinds", settings.keybindTarget(),
-                            "合并结果不可用（" + unusable + "），已放弃写入，目标文件保持不变（源："
-                                    + settings.keybindSource() + "）", false));
+                            "合并结果不可用（" + unusable + "），已放弃写入，目标文件保持不变", false));
                     return;
                 }
-                boolean wrote = write(target, merged);
+                boolean wrote = write(target, result.content());
                 actions.add(new Action("keybinds", settings.keybindTarget(),
-                        wrote ? "已按键位样本合并（源：" + settings.keybindSource() + "）"
-                                : "键位与样本一致，未改动（源：" + settings.keybindSource() + "）",
+                        wrote ? result.impact() : "键位与样本一致，未改动",
                         wrote));
             } catch (IOException ex) {
                 actions.add(new Action("keybinds", settings.keybindTarget(), "合并失败：" + ex.getMessage(), false));
@@ -671,6 +667,35 @@ public final class AgentInjector {
             return JsonKeybindMerger.merge(existing, sample);
         }
         return KeybindMerger.merge(existing, sample);
+    }
+
+    /** 键位合并结果 + 一句话影响描述（聊天栏 / 日志用，不出现源路径——影响落在哪个目标文件由 name 表达）。 */
+    record MergedKeybinds(String content, String impact) {
+    }
+
+    /** 合并并生成影响描述：JSON 报「按键位路径更新几处」，文本行报「更新几条、补齐几条（含声音几项）」。 */
+    static MergedKeybinds mergeKeybindsWithImpact(String targetName, String existing, String sample) {
+        if (isJsonTarget(targetName)) {
+            JsonKeybindMerger.MergeStats stats = JsonKeybindMerger.mergeWithStats(existing, sample);
+            return new MergedKeybinds(stats.content(), "按键位路径更新 " + stats.changed() + " 处");
+        }
+        KeybindMerger.MergeStats stats = KeybindMerger.mergeWithStats(existing, sample);
+        int sound = stats.soundUpdated() + stats.soundAdded();
+        String impact = "更新键位/声音 " + stats.totalUpdated() + " 条、补齐 " + stats.totalAdded() + " 条"
+                + (sound > 0 ? "（含声音 " + sound + " 项）" : "");
+        return new MergedKeybinds(stats.content(), impact);
+    }
+
+    /** 数一下数据文件里的条目行（形如 "xxx": ... 的行），用于整份覆盖动作的影响描述。 */
+    static int countEntries(String content) {
+        int n = 0;
+        for (String line : content.lines().toList()) {
+            String t = line.trim();
+            if (t.startsWith("\"") && t.contains(":") && !t.endsWith("{") && !t.endsWith("[")) {
+                n++;
+            }
+        }
+        return n;
     }
 
     /** 目标是不是 JSON 配置（决定用哪个合并器，以及要不要检查样本里有没有 keys）。 */
