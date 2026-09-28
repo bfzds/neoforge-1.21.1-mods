@@ -55,6 +55,8 @@ public final class PatcherAgent {
 
     private static void run(String args) {
         Path gameDir = null;
+        String bootId = null;
+        List<AgentInjector.Action> actions = new ArrayList<>();
         try {
             // 参数三种写法：
             //   -javaagent:xxx.jar                                 自动探测游戏目录 + 默认清单位置
@@ -84,7 +86,7 @@ public final class PatcherAgent {
             AgentInjector.Settings settings = AgentInjector.loadSettings(settingsFile);
             // 本次会话的「启动成功」握手：先作废旧凭据，等 mod 侧跑到 FMLCommonSetupEvent 才认账。
             // 游戏崩在 mod 加载阶段时，凭据永远写不出来，退出钩子就不会回写样本。
-            String bootId = SessionMarker.beginSession(gameDir);
+            bootId = SessionMarker.beginSession(gameDir);
             long crashBaseline = latestCrashReportMillis(gameDir);
             log("本次启动编号：" + bootId + "；只有游戏加载成功过才会回写样本");
             registerAutoExportHook(gameDir, settings, bootId, crashBaseline);
@@ -96,12 +98,16 @@ public final class PatcherAgent {
                 return;
             }
 
-            List<AgentInjector.Action> actions = AgentInjector.run(gameDir, settings, selfJar());
+            actions = AgentInjector.run(gameDir, settings, selfJar());
             report(actions);
         } catch (Throwable throwable) {
             // 注入失败绝不能拦住游戏启动
             log("注入过程出错（游戏会照常启动）：" + throwable);
+            actions.add(new AgentInjector.Action("error", "-",
+                    "注入过程出错：" + throwable, false));
         } finally {
+            // 本次注入结果落成会话报告，mod 侧在玩家进入世界时显示到聊天栏
+            SessionReport.write(gameDir, bootId, actions);
             flushLog(gameDir);
         }
     }

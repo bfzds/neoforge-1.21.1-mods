@@ -1,15 +1,23 @@
 package dev.configpatcher.event;
 
 import dev.configpatcher.ConfigPatcher;
+import dev.configpatcher.agent.SessionMarker;
+import dev.configpatcher.agent.SessionReport;
 import dev.configpatcher.engine.FailureLedger;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.common.util.FakePlayer;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -24,16 +32,73 @@ public final class JoinNotice {
     private JoinNotice() {
     }
 
+    /** 每次会话只显示一次注入摘要。 */
+    private static boolean sessionReportShown = false;
+
     @SubscribeEvent
     public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof FakePlayer || !(event.getEntity() instanceof ServerPlayer player)) {
             return;
         }
-        List<FailureLedger.Failure> failures = FailureLedger.failures();
-        if (failures.isEmpty()) {
+        if (!player.hasPermissions(2)) {
             return;
         }
-        if (!player.hasPermissions(2)) {
+        showSessionReport(player);
+        showFailures(player);
+    }
+
+    /**
+     * 把 Agent 写的会话报告（session-report.txt）显示到聊天栏：一眼看到本次启动注入了什么。
+     * 三个门槛：本次会话真的启动成功过；报告属于本次启动（bootId 与 session.ok 一致）；每个会话只显示一次。
+     */
+    private static void showSessionReport(ServerPlayer player) {
+        if (sessionReportShown) {
+            return;
+        }
+        Path gameDir = FMLPaths.GAMEDIR.get();
+        if (!SessionMarker.startedThisSession(gameDir)
+                || !Files.isRegularFile(gameDir.resolve(SessionReport.RELATIVE))) {
+            return;
+        }
+        String reportBootId = null;
+        List<String> chat = new ArrayList<>();
+        try {
+            for (String line : Files.readAllLines(gameDir.resolve(SessionReport.RELATIVE), StandardCharsets.UTF_8)) {
+                if (line.startsWith("bootId=")) {
+                    reportBootId = line.substring("bootId=".length()).trim();
+                } else if (line.startsWith("chat=")) {
+                    chat.add(line.substring("chat=".length()));
+                }
+            }
+        } catch (IOException ex) {
+            return;
+        }
+        if (chat.isEmpty() || reportBootId == null || reportBootId.isEmpty()
+                || !reportBootId.equals(okBootId(gameDir))) {
+            return; // 报告缺失或属于旧会话，不显示
+        }
+        sessionReportShown = true;
+        player.sendSystemMessage(Component.literal("[Config Patcher] 本次启动注入摘要：")
+                .withStyle(ChatFormatting.AQUA));
+        for (String line : chat) {
+            ChatFormatting style = line.startsWith("⚠") ? ChatFormatting.YELLOW
+                    : line.startsWith("✔") ? ChatFormatting.GREEN : ChatFormatting.GRAY;
+            player.sendSystemMessage(Component.literal("  " + line).withStyle(style));
+        }
+    }
+
+    private static String okBootId(Path gameDir) {
+        try {
+            Path ok = gameDir.resolve(SessionMarker.OK_RELATIVE);
+            return Files.isRegularFile(ok) ? Files.readString(ok, StandardCharsets.UTF_8).trim() : "";
+        } catch (IOException ex) {
+            return "";
+        }
+    }
+
+    private static void showFailures(ServerPlayer player) {
+        List<FailureLedger.Failure> failures = FailureLedger.failures();
+        if (failures.isEmpty()) {
             return;
         }
 
