@@ -55,6 +55,72 @@ class SampleExporterTest {
         assertTrue(actions.get(0).changed());
     }
 
+    /** 口径 A 验收 1：键位少的实例退出，全局样本一个键都不能少（实例没有的键保留全局原值）。 */
+    @Test
+    void smallerInstanceNeverShrinksGlobalSample(@TempDir Path instance, @TempDir Path library) throws IOException {
+        Path sample = library.resolve("options.txt");
+        Files.writeString(sample, "key_key.attack:key.keyboard.a\n"
+                + "key_key.jump:key.keyboard.space\nkey_key.sneak:key.keyboard.left.shift\n",
+                StandardCharsets.UTF_8);
+        Files.writeString(instance.resolve("options.txt"),
+                "fov:0.5\nkey_key.attack:key.keyboard.f\nkey_key.jump:key.keyboard.space\n",
+                StandardCharsets.UTF_8);
+
+        var actions = SampleExporter.export(instance,
+                settings(sample.toString(), "options.txt", List.of(), List.of()));
+
+        assertEquals("key_key.attack:key.keyboard.f\n"
+                        + "key_key.jump:key.keyboard.space\nkey_key.sneak:key.keyboard.left.shift\n",
+                Files.readString(sample, StandardCharsets.UTF_8), "实例没有的键位被砍掉了");
+        assertTrue(actions.get(0).changed());
+    }
+
+    /** 口径 A 验收 2：实例里新增 / 改过的键位要出现在全局样本里。 */
+    @Test
+    void newAndChangedKeysReachGlobalSample(@TempDir Path instance, @TempDir Path library) throws IOException {
+        Path sample = library.resolve("options.txt");
+        Files.writeString(sample, "key_key.attack:key.keyboard.a\n", StandardCharsets.UTF_8);
+        Files.writeString(instance.resolve("options.txt"),
+                "key_key.attack:key.keyboard.f\nkey_key.inventory:key.keyboard.e\n",
+                StandardCharsets.UTF_8);
+
+        SampleExporter.export(instance,
+                settings(sample.toString(), "options.txt", List.of(), List.of()));
+
+        assertEquals("key_key.attack:key.keyboard.f\nkey_key.inventory:key.keyboard.e\n",
+                Files.readString(sample, StandardCharsets.UTF_8));
+    }
+
+    /** 实例键位与全局完全一致时不回写、不留备份。 */
+    @Test
+    void identicalKeybindsAreNotRewritten(@TempDir Path instance, @TempDir Path library) throws IOException {
+        Path sample = library.resolve("options.txt");
+        String keys = "key_key.attack:key.keyboard.f\nkey_key.jump:key.keyboard.space\n";
+        Files.writeString(sample, keys, StandardCharsets.UTF_8);
+        Files.writeString(instance.resolve("options.txt"), "lang:zh_cn\n" + keys, StandardCharsets.UTF_8);
+
+        var actions = SampleExporter.export(instance,
+                settings(sample.toString(), "options.txt", List.of(), List.of()));
+
+        assertEquals(1, actions.size());
+        assertFalse(actions.get(0).changed());
+        assertFalse(Files.isDirectory(library.resolve(".backup")));
+    }
+
+    /** 全局样本还不存在时（新装样本库），首次回流直接生成。 */
+    @Test
+    void missingSampleIsCreated(@TempDir Path instance, @TempDir Path library) throws IOException {
+        Path sample = library.resolve("options.txt");
+        Files.writeString(instance.resolve("options.txt"),
+                "key_key.attack:key.keyboard.f\n", StandardCharsets.UTF_8);
+
+        var actions = SampleExporter.export(instance,
+                settings(sample.toString(), "options.txt", List.of(), List.of()));
+
+        assertEquals("key_key.attack:key.keyboard.f\n", Files.readString(sample, StandardCharsets.UTF_8));
+        assertTrue(actions.get(0).changed());
+    }
+
     @Test
     void fileOverrideIsCopiedBack(@TempDir Path instance, @TempDir Path library) throws IOException {
         String content = keybindSample("LEFT_CONTROL");

@@ -61,6 +61,51 @@ public final class KeybindMerger {
         return join(lines);
     }
 
+    /**
+     * 「退出回流」方向的合并（口径 A·只增改）：把实例的键位并进全局样本。
+     *
+     * <p>与 {@link #merge(String, String)}（注入：样本 → 实例）正好相反，这是导出方向（实例 → 样本）：
+     * <ul>
+     *     <li>实例里存在且与全局不同的 {@code key_*} 行 —— 原位更新进全局（保持全局的行顺序）；</li>
+     *     <li>实例有、全局没有的键 —— 追加到全局末尾；</li>
+     *     <li>全局有、实例没有的键 —— 原样保留，绝不删除。</li>
+     * </ul>
+     *
+     * <p>键位少的实例退出因此不会再把全局砍短（此前样本是整份覆盖，谁最后退出谁说了算，
+     * 全局键位曾被从 528 条砍到 464 条）。实例没有键位行时原样返回全局。
+     *
+     * @param global   全局样本当前内容（null / 空串也可以，此时结果就是实例的键位行）
+     * @param instance 实例的键位内容（只取其中的 {@code key_*} 行）
+     */
+    public static String mergeIntoGlobal(String global, String instance) {
+        Map<String, String> fromInstance = new LinkedHashMap<>();
+        for (String line : instance.lines().toList()) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith(KEY_PREFIX) && trimmed.indexOf(':') > 0) {
+                fromInstance.put(keyOf(trimmed), trimmed);
+            }
+        }
+        if (fromInstance.isEmpty()) {
+            return global;
+        }
+        List<String> lines = global == null ? new ArrayList<>() : new ArrayList<>(global.lines().toList());
+        Set<String> applied = new LinkedHashSet<>();
+        for (int i = 0; i < lines.size(); i++) {
+            String trimmed = lines.get(i).trim();
+            String key = keyOf(trimmed);
+            if (trimmed.startsWith(KEY_PREFIX) && fromInstance.containsKey(key)) {
+                lines.set(i, fromInstance.get(key));
+                applied.add(key);
+            }
+        }
+        for (Map.Entry<String, String> entry : fromInstance.entrySet()) {
+            if (!applied.contains(entry.getKey())) {
+                lines.add(entry.getValue());
+            }
+        }
+        return join(lines);
+    }
+
     /** 把资源包名（形如 {@code file/xxx.zip}）追加进 resourcePacks，并从 incompatible 列表移除。 */
     public static String ensureResourcePacks(String existing, Collection<String> packNames) {
         if (packNames == null || packNames.isEmpty()) {

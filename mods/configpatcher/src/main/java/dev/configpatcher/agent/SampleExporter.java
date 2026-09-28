@@ -19,8 +19,8 @@ import java.util.Locale;
  *
  * <h2>导出哪些</h2>
  * <ul>
- *     <li>{@code keybindSource} / {@code keybindTarget}：从实例的 {@code options.txt} 里抽出所有
- *         {@code key_*} 行，写成键位样本（分辨率、语言等无关设置不带进样本）；</li>
+ *     <li>{@code keybindSource} / {@code keybindTarget}：把实例 {@code options.txt} 里的 {@code key_*} 行
+ *         按「只增改」并入键位样本（分辨率、语言等无关设置不带进样本，实例没有的键位保留样本原值）；</li>
  *     <li>{@code keybindFileOverrides}：把实例里的目标文件整份回写成样本（如 tweakeroo.json）；</li>
  *     <li>{@code fileOverrides}：同上（如 recipe_type_names.json）。</li>
  * </ul>
@@ -74,7 +74,7 @@ public final class SampleExporter {
         return actions;
     }
 
-    /** 键位样本：只把实例 options.txt 里的 {@code key_*} 行带进样本。 */
+    /** 键位样本：把实例 options.txt 里的 {@code key_*} 行按「只增改」合并进全局样本（口径 A）。 */
     private static void exportKeybindSample(Path gameDir, AgentInjector.Settings settings,
                                             List<AgentInjector.Action> actions) {
         String source = settings.keybindSource();
@@ -89,6 +89,7 @@ public final class SampleExporter {
             actions.add(new AgentInjector.Action("export", nameOf(source), "实例里没有 " + targetName + "，跳过", false));
             return;
         }
+        Path sample = Path.of(source);
         try {
             List<String> keyLines = new ArrayList<>();
             for (String line : Files.readAllLines(target, StandardCharsets.UTF_8)) {
@@ -101,12 +102,33 @@ public final class SampleExporter {
                         targetName + " 里没有键位行，跳过", false));
                 return;
             }
-            boolean written = backupAndWrite(Path.of(source), String.join("\n", keyLines) + "\n");
+            // 崩溃 / 启动失败退出时实例的键位表可能是半成品，绝不能并进全局
+            String instanceContent = String.join("\n", keyLines) + "\n";
+            String reject = ConfigFileGuard.rejectReason(targetName, true, instanceContent);
+            if (reject != null) {
+                actions.add(new AgentInjector.Action("export", nameOf(source),
+                        "内容异常（" + reject + "），已跳过回写，样本保持不变", false));
+                return;
+            }
+            // 口径 A（只增改）：以全局为基准合并——实例没有的键位保留全局原值，全局永不缩减
+            String global = Files.isRegularFile(sample)
+                    ? Files.readString(sample, StandardCharsets.UTF_8)
+                    : "";
+            long before = countKeyLines(global);
+            String merged = KeybindMerger.mergeIntoGlobal(global, instanceContent);
+            long after = countKeyLines(merged);
+            boolean written = backupAndWrite(sample, merged);
             actions.add(new AgentInjector.Action("export", nameOf(source),
-                    written ? "已回写 " + keyLines.size() + " 条键位" : "与样本一致，无需回写", written));
+                    written ? "已按键位样本合并：全局 " + before + " → " + after + " 条"
+                            : "与样本一致，无需回写", written));
         } catch (IOException ex) {
             actions.add(new AgentInjector.Action("export", nameOf(source), "回写失败：" + ex.getMessage(), false));
         }
+    }
+
+    private static long countKeyLines(String content) {
+        return content == null ? 0
+                : content.lines().filter(line -> line.trim().startsWith("key_")).count();
     }
 
     /**
