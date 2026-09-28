@@ -75,8 +75,7 @@ tasks.named('processResources', ProcessResources).configure {
             mod_authors      : mod_authors,
             mod_description  : mod_description,
             minecraft_version: minecraft_version,
-            neoforge_version : neoforge_version,
-            neoforge_version_range: neoforge_version_range
+            neoforge_version : neoforge_version
     ]
 
     inputs.properties replaceProperties
@@ -84,6 +83,22 @@ tasks.named('processResources', ProcessResources).configure {
         expand replaceProperties
     }
 }
+
+// 构建信息（版本标识）：Agent 启动日志与 /configpatcher version 读取，用来确认「实例里跑的是哪次构建」。
+def buildInfoDir = layout.buildDirectory.dir('generated/buildinfo')
+sourceSets.main.resources.srcDir(buildInfoDir)
+tasks.register('generateBuildInfo') {
+    def outFile = buildInfoDir.map { it.file('configpatcher/build-info.properties') }
+    inputs.property('mod_version', mod_version)
+    doLast {
+        def file = outFile.get().asFile
+        file.parentFile.mkdirs()
+        def stamp = java.time.format.DateTimeFormatter.ofPattern('yyyy-MM-dd HH:mm:ss')
+                .format(java.time.LocalDateTime.now())
+        file.text = "build.version=${mod_version}\nbuild.time=${stamp}\n"
+    }
+}
+tasks.named('processResources') { dependsOn 'generateBuildInfo' }
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = "UTF-8"

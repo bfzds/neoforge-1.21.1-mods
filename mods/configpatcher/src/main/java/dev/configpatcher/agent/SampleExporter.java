@@ -8,8 +8,10 @@ import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
  * “关闭游戏自动导出”的执行体：把实例里**当前生效**的配置回写成本地样本库的文件。
@@ -34,7 +36,8 @@ import java.util.Locale;
  *
  * <h2>安全设计</h2>
  * <ul>
- *     <li>写样本前先把旧样本复制到 {@code <样本目录>/.backup/<时间戳>/}，导错了还能回滚；</li>
+ *     <li>写样本前先把旧样本复制到 {@code <样本目录>/.backup/<时间戳>/}，导错了还能回滚
+ *         （最多保留 20 份，写备份时自动清理更旧的）；</li>
  *     <li>内容与样本一致时直接跳过，不写文件、不产生备份；</li>
  *     <li>任何一步失败都只记日志，绝不影响游戏退出。</li>
  * </ul>
@@ -147,6 +150,7 @@ public final class SampleExporter {
                     "实例里没有 " + override.to() + "，跳过", false));
             return;
         }
+        Path sample = Path.of(override.from());
         try {
             String content = Files.readString(target, StandardCharsets.UTF_8);
             String reject = ConfigFileGuard.rejectReason(override.to(), keybindFile, content);
@@ -156,9 +160,28 @@ public final class SampleExporter {
                         "内容异常（" + reject + "），已跳过回写，样本保持不变", false));
                 return;
             }
-            boolean written = backupAndWrite(Path.of(override.from()), content);
+            // 键位 JSON（tweakeroo 这类）按口径 A「只增改」合并：以样本为基准，只更新实例里改过的 keys 值，
+            // 样本里实例没有的条目一律保留 —— 键位内容有差异的实例退出不再把样本整份带偏。
+            // 样本不存在 / 已损坏（canPatchInPlace 不通过）时才整份采用实例，和旧行为一致，作为兜底。
+            String toWrite = content;
+            String how = "整份";
+            if (keybindFile && Files.isRegularFile(sample)) {
+                String global = Files.readString(sample, StandardCharsets.UTF_8);
+                if (JsonKeybindMerger.canPatchInPlace(global)) {
+                    String merged = JsonKeybindMerger.merge(global, content);
+                    String mergedReject = ConfigFileGuard.rejectMergedResult(override.to(), merged);
+                    if (mergedReject != null) {
+                        actions.add(new AgentInjector.Action("export", nameOf(override.from()),
+                                "合并结果异常（" + mergedReject + "），已跳过回写，样本保持不变", false));
+                        return;
+                    }
+                    toWrite = merged;
+                    how = "合并";
+                }
+            }
+            boolean written = backupAndWrite(sample, toWrite);
             actions.add(new AgentInjector.Action("export", nameOf(override.from()),
-                    written ? "已回写（" + kind + "，源：" + override.to() + "）" : "与样本一致，无需回写", written));
+                    written ? "已回写（" + kind + "，" + how + "，源：" + override.to() + "）" : "与样本一致，无需回写", written));
         } catch (IOException ex) {
             actions.add(new AgentInjector.Action("export", nameOf(override.from()),
                     "回写失败：" + ex.getMessage(), false));
@@ -194,9 +217,47 @@ public final class SampleExporter {
             Files.createDirectories(backupDir);
             Files.copy(destination, backupDir.resolve(destination.getFileName()),
                     StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+            pruneBackups(backupDir.getParent());
         }
         Files.writeString(destination, content, StandardCharsets.UTF_8);
         return true;
+    }
+
+    /** .backup 下最多保留的份数；再写就删最旧的，防止长期使用堆积成几百个目录。 */
+    static final int MAX_BACKUPS = 20;
+    private static final Pattern BACKUP_DIR_NAME = Pattern.compile("\\d{8}-\\d{6}");
+
+    /** 只保留最近 MAX_BACKUPS 份备份目录（按时间戳目录名倒序），多余的全部递归删除。 */
+    static void pruneBackups(Path backupRoot) {
+        if (backupRoot == null || !Files.isDirectory(backupRoot)) {
+            return;
+        }
+        List<Path> dirs;
+        try (var stream = Files.list(backupRoot)) {
+            dirs = stream.filter(Files::isDirectory)
+                    .filter(dir -> BACKUP_DIR_NAME.matcher(dir.getFileName().toString()).matches())
+                    .sorted(Comparator.comparing((Path dir) -> dir.getFileName().toString()).reversed())
+                    .toList();
+        } catch (IOException ex) {
+            return; // 清理失败不影响本次导出
+        }
+        for (int i = MAX_BACKUPS; i < dirs.size(); i++) {
+            deleteRecursively(dirs.get(i));
+        }
+    }
+
+    private static void deleteRecursively(Path dir) {
+        try (var stream = Files.walk(dir)) {
+            stream.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.delete(path);
+                } catch (IOException ignored) {
+                    // 删不掉就留给下次
+                }
+            });
+        } catch (IOException ignored) {
+            // 同上
+        }
     }
 
     private static String nameOf(String spec) {

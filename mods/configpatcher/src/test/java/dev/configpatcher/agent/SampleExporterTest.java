@@ -138,6 +138,56 @@ class SampleExporterTest {
                 Files.readString(sample, StandardCharsets.UTF_8));
     }
 
+    /** 建议1：键位 JSON 回流改只增改 —— 实例改过的键进样本，样本里实例没有的条目一律保留。 */
+    @Test
+    void keybindJsonExportMergesInsteadOfOverwrite(@TempDir Path instance, @TempDir Path library) throws IOException {
+        Path sample = library.resolve("tweakeroo.json");
+        String global = keybindSample("LEFT_CONTROL");
+        Files.writeString(sample, global, StandardCharsets.UTF_8);
+        String instanceContent = global.replace("\"keys\": \"LEFT_CONTROL\"", "\"keys\": \"RIGHT_ALT\"");
+        Path targetDir = instance.resolve("config");
+        Files.createDirectories(targetDir);
+        Files.writeString(targetDir.resolve("tweakeroo.json"), instanceContent, StandardCharsets.UTF_8);
+
+        SampleExporter.export(instance, settings(null, "options.txt",
+                List.of(new AgentInjector.FileOverride(sample.toString(), "config/tweakeroo.json")),
+                List.of()));
+
+        String after = Files.readString(sample, StandardCharsets.UTF_8);
+        assertTrue(after.contains("\"keys\": \"RIGHT_ALT\""), "实例改过的键位应并进样本");
+        assertEquals(countKeys(global), countKeys(after), "合并只改值，不应增删条目");
+    }
+
+    /** 建议3：备份保留策略 —— .backup 里只留最近 20 份，更旧的自动清理。 */
+    @Test
+    void backupRetentionKeepsOnlyNewestTwenty(@TempDir Path instance, @TempDir Path library) throws IOException {
+        Path sample = library.resolve("tweakeroo.json");
+        Files.writeString(sample, "old\n", StandardCharsets.UTF_8);
+        Path backups = library.resolve(".backup");
+        for (int i = 1; i <= 25; i++) {
+            Path dir = backups.resolve(String.format("20260101-%06d", i));
+            Files.createDirectories(dir);
+            Files.writeString(dir.resolve("tweakeroo.json"), "bak" + i + "\n", StandardCharsets.UTF_8);
+        }
+        Path targetDir = instance.resolve("config");
+        Files.createDirectories(targetDir);
+        Files.writeString(targetDir.resolve("tweakeroo.json"), keybindSample("LEFT_CONTROL"), StandardCharsets.UTF_8);
+
+        SampleExporter.export(instance, settings(null, "options.txt",
+                List.of(new AgentInjector.FileOverride(sample.toString(), "config/tweakeroo.json")),
+                List.of()));
+
+        try (Stream<Path> walk = Files.list(backups)) {
+            assertEquals(20, walk.filter(Files::isDirectory).count(), "应只保留最近 20 份");
+        }
+        assertFalse(Files.exists(backups.resolve("20260101-000005")), "最旧的备份应被删除");
+        assertTrue(Files.exists(backups.resolve("20260101-000025")), "较新的备份应保留");
+    }
+
+    private static long countKeys(String json) {
+        return json.lines().filter(line -> line.trim().startsWith("\"keys\"")).count();
+    }
+
     @Test
     void fileOverrideIsCopiedBack(@TempDir Path instance, @TempDir Path library) throws IOException {
         String content = keybindSample("LEFT_CONTROL");

@@ -2,6 +2,7 @@ package dev.configpatcher.command;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import dev.configpatcher.agent.Version;
 import dev.configpatcher.engine.FailureLedger;
 import dev.configpatcher.engine.ModPresence;
 import dev.configpatcher.engine.PatchEngine;
@@ -27,6 +28,7 @@ import java.util.Set;
  * /configpatcher reload           重新读取 rules.json（改完规则不用重启）
  * /configpatcher apply            把所有已加载配置重新过一遍规则
  * /configpatcher dump &lt;modid&gt;     导出目标 mod 的真实配置项 + 生成规则草稿
+ * /configpatcher version           看当前构建版本与构建时间（确认实例里跑的是哪次构建）
  * </pre>
  */
 public final class ConfigPatcherCommand {
@@ -57,6 +59,8 @@ public final class ConfigPatcherCommand {
                                 .then(Commands.argument("modid", StringArgumentType.word())
                                         .executes(context -> dump(context.getSource(),
                                                 StringArgumentType.getString(context, "modid")))))
+                        .then(Commands.literal("version")
+                                .executes(context -> version(context.getSource())))
         );
     }
 
@@ -210,6 +214,11 @@ public final class ConfigPatcherCommand {
         for (String line : result.preview()) {
             sendRaw(source, line);
         }
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private static int version(CommandSourceStack source) {
+        send(source, "版本：" + Version.describe());
         return Command.SINGLE_SUCCESS;
     }
 

@@ -77,6 +77,7 @@ public final class PatcherAgent {
                     ? settingsOverride
                     : gameDir.resolve(SETTINGS_RELATIVE);
             ensureSettingsFile(settingsFile);
+            log("ConfigPatcher Agent " + Version.describe());
             log("游戏目录：" + gameDir + (gameDirOverride != null ? "（手工指定）" : "（自动探测）"));
             log("注入清单：" + settingsFile + (Files.isRegularFile(settingsFile) ? "" : "（不存在，跳过注入）"));
 
