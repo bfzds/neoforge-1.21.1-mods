@@ -14,6 +14,9 @@
 - `sync-presets.ps1`：发布前把样本库同步成 jar 内置预设。
 - 聊天栏注入摘要：持有 OP 的玩家首次进入世界时显示本次 Agent 注入了什么（`session-report.txt` 双侧联动；bootId 防陈旧报告，每会话仅显示一次）。
 
+### Fixed
+- 修复 CI 构建失败：`build.gradle` 的 `replaceProperties` 误删了 `neoforge_version_range` 变量，`processResources` 展开 `neoforge.mods.toml` 时报 Missing property。
+
 ### Changed
 - 注入摘要改为影响导向描述：键位合并报「更新几条、补齐几条（含声音几项）」，键位 JSON 报「按键位路径更新几处」，整份覆盖报条目数，valueEdits 带目标文件名；不再显示源路径。
 - 键位 JSON（`keybindFileOverrides`，如 tweakeroo.json）的退出回流从整份覆盖改为路径感知合并：以样本为基准，只更新实例改过的 keys 值；样本不存在或损坏时才整份采用实例（与旧行为一致的兜底）。
